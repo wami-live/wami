@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>GPS Where Am I</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+
+<style>
+    body {
+        margin: 0;
+        padding: 0;
+        background: black;
+        color: white;
+        font-family: Arial, sans-serif;
+        text-align: center;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        height: 100vh;
+        transition: background-color 0.3s ease;
+    }
+
+    .container {
+        width: 95vw;
+        max-width: 900px;
+    }
+
+    .wakeBtn {
+        padding: 12px 20px;
+        font-size: 20px;
+        margin-bottom: 20px;
+        border: none;
+        border-radius: 10px;
+        background: #33aaff;
+        color: black;
+        font-weight: bold;
+    }
+
+    .title {
+        font-size: 6vw;
+        font-weight: bold;
+        margin-bottom: 3vw;
+    }
+
+    .data { font-size: 5vw; margin: 2vw 0; }
+
+    
+    @media (min-width: 900px){
+        .title{font-size:50px;}
+        .data{font-size:40px;}
+    }
+
+    @media (orientation: landscape) and (max-height:500px){
+        .title{font-size:4vw;}
+        .data{font-size:3.3vw;}
+        .speedRow{font-size:6vw;}
+    }
+
+    .data span { display:inline-block; min-width:120px; }
+</style>
+</head>
+
+<body>
+<div class="container">
+
+    <button id="wakeBtn" class="wakeBtn">Keep Screen Awake</button>
+
+    <div class="title">GPS Where Am I</div>
+
+    <div class="data">Lat: <span id="lat">--</span></div>
+    <div class="data">Lon: <span id="lon">--</span></div>
+
+    
+    <div class="data">Accuracy: <span id="acc">--</span> m</div>
+</div>
+
+<script>
+// ---------- Screen Wake Lock ----------
+const wakeBtn = document.getElementById("wakeBtn");
+let wakeLock = null;
+
+async function enableWakeLock() {
+    try {
+        wakeLock = await navigator.wakeLock.request("screen");
+
+        wakeLock.addEventListener("release", () => {
+            console.log("WakeLock released… trying to re-acquire");
+            enableWakeLock();
+        });
+
+        wakeBtn.style.display = "none";
+        console.log("Wake Lock active");
+    } catch (e) {
+        console.log("WakeLock Error:", e);
+    }
+}
+
+wakeBtn.addEventListener("click", enableWakeLock);
+
+// ---------- GPS ----------
+const latEl = document.getElementById("lat");
+const lonEl = document.getElementById("lon");
+const accEl = document.getElementById("acc");
+
+
+if (navigator.geolocation) {
+    navigator.geolocation.watchPosition(updateUI, gpsError, {
+        enableHighAccuracy: true,
+        maximumAge: 0,
+        timeout: 5000
+    });
+}
+
+function gpsError(e){ console.log("GPS Error:", e); }
+
+function updateUI(pos) {
+    const c = pos.coords;
+
+    // Lat/Lon/Accuracy
+    latEl.textContent = c.latitude.toFixed(6);
+    lonEl.textContent = c.longitude.toFixed(6);
+    accEl.textContent = c.accuracy !== null ? c.accuracy.toFixed(1) : "--";
+
+    
+    
+}
+</script>
+
+</body>
+</html>
