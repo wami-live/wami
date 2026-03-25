@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>Mobile Geolocation GPX</title>
+<style>
+  body {
+    font-family: Arial, Helvetica, sans-serif;
+    background: url("gb.svg") center/cover no-repeat, #f0f0f0;
+    margin: 0;
+    height: 100vh;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+  }
+  .card {
+    background: rgba(255,255,255,0.95);
+    border-radius: 20px;
+    box-shadow: 0 6px 18px rgba(0,0,0,0.25);
+    padding: 30px 20px;
+    text-align: center;
+    width: min(90%, 400px);
+    backdrop-filter: blur(6px);
+  }
+  h1 { margin-bottom: 10px; font-size: 1.8em; }
+  #demo { margin-top: 20px; font-size: 20px; font-weight: bold; color: #222; min-height: 60px; word-wrap: break-word; }
+  .btn-container { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; margin-top: 20px; }
+  
+  button {
+    flex: 1; min-width: 120px; padding: 12px 18px; font-size: 16px;
+    border: none; border-radius: 12px; color: white;
+    background: #007bff;
+    cursor: pointer; transition: transform 0.2s ease;
+    position: relative;
+    overflow: hidden;
+    user-select: none; /* Prevents text selection while holding */
+    -webkit-user-select: none;
+  }
+
+  /* Specific styles for the Stop Button hold effect */
+  #stopBtn {
+    background: #6c757d; 
+  }
+
+  /* The visual progress fill */
+  #stopBtn .progress-fill {
+    position: absolute;
+    top: 0; left: 0; height: 100%;
+    width: 0%;
+    background: #dc3545; /* Red for stop */
+    transition: width 0.1s linear;
+    z-index: 1;
+  }
+
+  #stopBtn span {
+    position: relative;
+    z-index: 2; /* Keep text above the fill */
+  }
+
+  button:hover { transform: translateY(-2px); }
+  button:disabled { background: #ccc !important; cursor: not-allowed; transform: none; }
+  
+  #downloadBtn {
+    background: linear-gradient(135deg, #28a745, #1e7e34);
+  }
+</style>
+</head>
+<body>
+
+<div class="card">
+  <h1>📍 Mobile Geolocation</h1>
+  <p>Your coordinates will be recorded to GPX:</p>
+  <div class="btn-container">
+    <button id="stopBtn">
+      <div class="progress-fill" id="fill"></div>
+      <span id="stopText">⏹ Stop</span>
+    </button>
+    <button id="downloadBtn" disabled>⬇ Download GPX</button>
+  </div>
+  <p id="demo" role="status" aria-live="polite">Initializing GPS…</p>
+</div>
+
+<script>
+const x = document.getElementById("demo");
+const stopBtn = document.getElementById("stopBtn");
+const stopText = document.getElementById("stopText");
+const fill = document.getElementById("fill");
+const downloadBtn = document.getElementById("downloadBtn");
+
+let watchId = null;
+let gpxPoints = [];
+let wakeLock = null;
+let wakeLockTimer = null;
+let lastRecordTime = null;
+
+// --- Hold-to-Stop Logic ---
+let holdTimer = null;
+let holdDuration = 10000; // 10 seconds
+let startTime = null;
+
+function startHold(e) {
+  if (watchId === null) return;
+  e.preventDefault(); // Prevents long-press context menus on mobile
+  
+  startTime = Date.now();
+  holdTimer = setInterval(() => {
+    let elapsed = Date.now() - startTime;
+    let percentage = (elapsed / holdDuration) * 100;
+    let secondsLeft = Math.ceil((holdDuration - elapsed) / 1000);
+
+    if (elapsed >= holdDuration) {
+      clearInterval(holdTimer);
+      finalizeStop();
+    } else {
+      fill.style.width = percentage + "%";
+      stopText.textContent = `Hold ${secondsLeft}s`;
+    }
+  }, 100);
+}
+
+function cancelHold() {
+  if (holdTimer) {
+    clearInterval(holdTimer);
+    holdTimer = null;
+    fill.style.width = "0%";
+    stopText.textContent = "⏹ Stop";
+  }
+}
+
+// Event listeners for the hold action
+stopBtn.addEventListener("mousedown", startHold);
+stopBtn.addEventListener("touchstart", startHold);
+window.addEventListener("mouseup", cancelHold);
+window.addEventListener("touchend", cancelHold);
+
+function finalizeStop() {
+  if (watchId !== null) {
+    navigator.geolocation.clearWatch(watchId);
+    watchId = null;
+    disableWakeLock();
+    
+    stopBtn.disabled = true; // Fully disable stop once finished
+    fill.style.width = "0%";
+    stopText.textContent = "Stopped";
+    
+    downloadBtn.disabled = gpxPoints.length === 0;
+    x.textContent = `Tracking stopped. ${gpxPoints.length} points recorded.`;
+  }
+}
+
+// --- Original Logic ---
+
+async function enableWakeLock() {
+  try {
+    if (wakeLock) { await wakeLock.release(); wakeLock = null; }
+    wakeLock = await navigator.wakeLock?.request("screen");
+    if (wakeLockTimer) clearInterval(wakeLockTimer);
+    wakeLockTimer = setInterval(enableWakeLock, 5 * 60 * 1000);
+  } catch (err) { console.warn("Wake Lock not supported:", err); }
+}
+
+function disableWakeLock() {
+  if (wakeLockTimer) { clearInterval(wakeLockTimer); wakeLockTimer = null; }
+  if (wakeLock) { wakeLock.release(); wakeLock = null; }
+}
+
+function startTracking() {
+  if (!navigator.geolocation) {
+    x.textContent = "❌ Geolocation not supported.";
+    return;
+  }
+  watchId = navigator.geolocation.watchPosition(success, error, {
+    enableHighAccuracy: true,
+    maximumAge: 5000,
+    timeout: 10000
+  });
+
+  gpxPoints = [];
+  downloadBtn.disabled = true;
+  x.textContent = "Recording GPS points…";
+  enableWakeLock();
+}
+
+function success(pos) {
+  const lat = pos.coords.latitude.toFixed(6);
+  const lon = pos.coords.longitude.toFixed(6);
+  const acc = pos.coords.accuracy.toFixed(1);
+  const time = pos.timestamp;
+  const speed = pos.coords.speed !== null ? pos.coords.speed * 3.6 : null;
+
+  let interval = 3000; 
+  if (speed !== null) {
+    if (speed >= 80) interval = 20000;
+    else if (speed >= 30) interval = 10000;
+    else if (speed >= 3) interval = 3000;
+  }
+
+  if (!lastRecordTime || (time - lastRecordTime) >= interval) {
+    gpxPoints.push({lat, lon, time});
+    lastRecordTime = time;
+  }
+
+  x.innerHTML = `Last point: ${lat}, ${lon}<br>Accuracy: ±${acc}m<br>Points recorded: ${gpxPoints.length}`;
+}
+
+function error(err) {
+  const messages = { 1: "❌ Denied", 2: "⚠️ Unavailable", 3: "⏳ Timeout" };
+  x.textContent = messages[err.code] || "❓ Unknown error.";
+}
+
+downloadBtn.addEventListener("click", () => {
+  if (gpxPoints.length === 0) return;
+  const gpxHeader = `<?xml version="1.0" encoding="UTF-8"?>\n<gpx version="1.1" creator="MobileGeolocation" xmlns="http://www.topografix.com/GPX/1/1">\n<trk><name>GPS Track</name><trkseg>`;
+  const gpxFooter = `</trkseg></trk></gpx>`;
+  const gpxBody = gpxPoints.map(p => `<trkpt lat="${p.lat}" lon="${p.lon}"><time>${new Date(p.time).toISOString()}</time></trkpt>`).join("\n");
+  const blob = new Blob([gpxHeader + "\n" + gpxBody + "\n" + gpxFooter], { type: "application/gpx+xml" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `track-${Date.now()}.gpx`;
+  a.click();
+});
+
+window.addEventListener("load", startTracking);
+window.addEventListener("beforeunload", disableWakeLock);
+</script>
+</body>
+</html>
