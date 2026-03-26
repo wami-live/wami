@@ -1,0 +1,636 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <title>Route Planner Pro - Auto-Add Search</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+    <style>
+        html, body {
+            margin: 0; height: 100%; width: 100vw;
+            overflow: hidden; font-family: sans-serif; background: #f9f9f9;
+        }
+        #map { position: absolute; top: 0; left: 0; right: 0; bottom: 0; }
+        #sidebar {
+            position: fixed; top: 0; right: 0; width: 360px; height: 100vh;
+            background: #f9f9f9; border-left: 1px solid #ccc;
+            padding: calc(15px + env(safe-area-inset-top)) 15px calc(15px + env(safe-area-inset-bottom)) 15px;
+            box-sizing: border-box; z-index: 1000; transition: transform 0.3s ease; overflow-y: auto;
+        }
+        #sidebar.collapsed { transform: translateX(100%); }
+        #sidebarToggle {
+            width: 36px; height: 54px; background: #007bff; color: #fff;
+            font-size: 22px; display: flex; align-items: center; justify-content: center;
+            cursor: pointer; border-radius: 6px 0 0 6px; z-index: 6000;
+            position: fixed; right: 360px; top: 50%; transform: translateY(-50%); transition: right 0.3s ease;
+        }
+        #sidebar.collapsed + #sidebarToggle { right: 0; }
+        #tableContainer { border: 1px solid #ccc; margin-top: 10px; height: auto; }
+        #stopsTable { width: 100%; border-collapse: collapse; font-size: 12px; }
+        #stopsTable th, #stopsTable td { padding: 3px 4px; border: 1px solid #ccc; }
+        .drag-handle { cursor: grab; text-align: center; width: 20px; font-weight: bold; }
+        .marker-label {
+            color: #fff; border-radius: 50%; width: 24px; height: 24px;
+            line-height: 24px; text-align: center; font-weight: bold;
+            border: 2px solid white; box-shadow: 0 0 2px rgba(0,0,0,0.5);
+        }
+        .routing-switch-container {
+            display: flex; align-items: center; gap: 10px; padding: 8px;
+            background: #eee; border-radius: 4px; font-size: 11px; margin-bottom: 5px;
+        }
+        .switch { position: relative; display: inline-block; width: 34px; height: 20px; }
+        .switch input { opacity: 0; width: 0; height: 0; }
+        .slider {
+            position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0;
+            background-color: #ccc; transition: .4s; border-radius: 20px;
+        }
+        .slider:before {
+            position: absolute; content: ""; height: 14px; width: 14px;
+            left: 3px; bottom: 3px; background-color: white; transition: .4s; border-radius: 50%;
+        }
+        input:checked + .slider { background-color: #3b82f6; }
+        input:checked + .slider:before { transform: translateX(14px); }
+        .btn-group { display: flex; gap: 4px; flex-wrap: wrap; margin-bottom: 10px; }
+        button { cursor: pointer; padding: 4px 8px; border-radius: 4px; border: 1px solid #ccc; background: #fff; }
+        .btn-blue { background: #3b82f6; color: white; border: none; font-weight: bold; }
+        .btn-success { background: #10b981; color: white; border: none; }
+        .btn-warning { background: #f97316; color: white; border: none; }
+        .export-settings { background: #f0f4ff; padding: 8px; border-radius: 4px; margin-bottom: 10px; border: 1px solid #d1d5db; }
+        .location-dot { width: 10px; height: 10px; background: red; border-radius: 50%; }
+        .location-dot.flash { animation: flash 0.8s ease-out 2; }
+        @keyframes flash { 0% { opacity: 1; } 50% { opacity: 0.3; } 100% { opacity: 1; } }
+        
+        .search-container { position: relative; width: 100%; margin-bottom: 4px; }
+        #clearSearchBtn {
+            position: absolute; right: 8px; top: 50%; transform: translateY(-50%);
+            border: none; background: transparent; color: #999; font-size: 20px;
+            cursor: pointer; display: none; line-height: 1; padding: 0;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="map"></div>
+
+    <aside id="sidebar">
+        <div class="routing-switch-container">
+            <strong>Map Mode:</strong>
+            <label class="switch">
+                <input type="checkbox" id="routingToggle" onchange="calculateRoute()">
+                <span class="slider"></span>
+            </label>
+            <span id="routingStatusLabel">Points Only</span>
+        </div>
+        <div class="routing-switch-container">
+            <strong>Lock Points:</strong>
+            <label class="switch">
+                <input type="checkbox" id="lockPointsToggle">
+                <span class="slider"></span>
+            </label>
+            <span id="lockPointsLabel">Locked</span>
+			</div>
+			
+
+        <div class="btn-group">
+            <button onclick="clearStops()">Clear All</button>
+            <button onclick="deleteSelectedStops()">Delete Selected</button>
+            <button type="button" class="btn-success" onclick="document.getElementById('universalImport').click()">Import File</button>
+            <input type="file" id="universalImport" multiple accept=".gpx,.txt,.csv" style="display:none;" onchange="handleUniversalImport(event)">
+        </div>
+
+        <div class="export-settings">
+            <input type="text" id="exportFileName" placeholder="File name (optional)" style="width:100%; box-sizing:border-box; padding:4px; margin-bottom:8px;">
+            <div class="btn-group" style="margin-bottom:0;">
+                <button class="btn-blue" onclick="exportWaypoints()">Save Points</button>
+                <button class="btn-blue" onclick="exportRoadTrack()">Save Track</button>
+            </div>
+        </div>
+
+        <span id="fileLabel" style="font-size:11px; color:#555; display:block; margin-bottom:10px;"></span>
+        <button id="toggleLocation" style="width:100%; margin-bottom:10px;">Enable Current Location</button>
+        
+        <div id="customerFileInfo" style="font-size:12px;color:#555; margin-bottom:4px;">Search (File or Online):</div>
+        
+        <div class="search-container">
+            <input type="text" id="customerSearchBox" placeholder="Start typing address or postcode..." style="width:100%; box-sizing:border-box; padding:6px 30px 6px 6px;">
+            <button id="clearSearchBtn" title="Clear Search">&times;</button>
+        </div>
+        
+        <select id="customerMatchSelect" size="5" style="display:none; width:100%; margin-top:4px;"></select>
+        <button id="customerAddSelectedBtn" class="btn-warning" style="display:none; width:100%; margin-top:4px;">Add Selected to Route</button>
+        
+        <hr>
+        <div style="font-size: 14px; color: #555;">Manual Add:</div>
+        <input type="text" id="manualName" placeholder="Name" style="width:95%; padding:4px; margin-top:4px;">
+        <div style="display:flex; gap:4px; margin-top:4px;">
+            <input type="text" id="manualLat" placeholder="Lat" style="width:47%; padding:4px;">
+            <input type="text" id="manualLon" placeholder="Lon" style="width:47%; padding:4px;">
+        </div>
+        <button onclick="addManualStop()" style="margin-top:4px; width:100%;">Add Manually</button>
+			<button onclick="startQrScanner()" style="width:100%; margin-bottom:10px;">
+			Scan API Key (QR)
+			</button>
+			
+        <div id="tableContainer">
+            <table id="stopsTable">
+                <thead><tr><th>#</th><th>Name</th><th>Del</th></tr></thead>
+                <tbody id="stopsBody"></tbody>
+            </table>
+        </div>
+        <div id="routeInfo" style="margin-top:10px; font-weight:bold; color:#00008B;"></div>
+    </aside>
+
+    <div id="sidebarToggle">&#x25C0;</div>
+
+    <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/Sortable/1.15.0/Sortable.min.js"></script>
+	<script src="https://unpkg.com/html5-qrcode"></script>
+
+    <script>
+        const WORK_START = { name: "Start", lat: 54.971630, lon: -2.949631 };
+        const WORK_STOP = { name: "End", lat: 54.971653, lon: -2.949319 };
+        let MAPBOX_TOKEN = 'pk.xxxxx';
+		const SEARCH_SESSION_TOKEN = crypto.randomUUID();
+
+        const map = L.map('map').setView([54.58303, -2.56954], 6);
+		L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19 }).addTo(map);
+		map.doubleClickZoom.disable(); //<<<<<<<<<<<<<<<<<<<<<<<
+
+        let stops = [WORK_START, WORK_STOP];
+        let customerData = [];
+        let markers = [];
+        let pointsLocked = true;
+        let routeLine = null;
+        let currentRouteGeometry = null;
+        let sortable = null;
+
+        const stopsBody = document.getElementById("stopsBody");
+        const customerMatchSelect = document.getElementById("customerMatchSelect");
+        const searchBox = document.getElementById("customerSearchBox");
+        const clearBtn = document.getElementById("clearSearchBtn");
+		
+		let locationWatchId = null;
+let userLocationMarker = null;
+
+document.getElementById("toggleLocation").addEventListener("click", () => {
+    const btn = document.getElementById("toggleLocation");
+
+    // If already active → disable
+    if (locationWatchId !== null) {
+        navigator.geolocation.clearWatch(locationWatchId);
+        locationWatchId = null;
+
+        if (userLocationMarker) {
+            map.removeLayer(userLocationMarker);
+            userLocationMarker = null;
+        }
+
+        btn.textContent = "Enable Current Location";
+        return;
+    }
+
+    if (!navigator.geolocation) {
+        alert("Geolocation is not supported by your browser.");
+        return;
+    }
+
+    // Start watching location
+    locationWatchId = navigator.geolocation.watchPosition(
+        (pos) => {
+            const lat = pos.coords.latitude;
+            const lon = pos.coords.longitude;
+
+            const latlng = [lat, lon];
+
+            map.setView(latlng, 16);
+
+            // Create blue dot marker (no popup/label)
+            const blueDotIcon = L.divIcon({
+                className: '',
+                html: `<div style="
+                    width:12px;
+                    height:12px;
+                    background:#1e90ff;
+                    border-radius:50%;
+                    border:2px solid white;
+                    box-shadow:0 0 4px rgba(0,0,0,0.5);
+                "></div>`,
+                iconSize: [12, 12],
+                iconAnchor: [6, 6]
+            });
+
+            if (userLocationMarker) {
+                userLocationMarker.setLatLng(latlng);
+            } else {
+                userLocationMarker = L.marker(latlng, { icon: blueDotIcon }).addTo(map);
+            }
+        },
+        (err) => {
+            console.error(err);
+            alert("Unable to retrieve your location.");
+        },
+        {
+            enableHighAccuracy: true,
+            maximumAge: 0,
+            timeout: 10000
+        }
+    );
+
+    btn.textContent = "Disable Current Location";
+});
+
+        // --- SEARCH LOGIC ---
+
+        function debounce(func, timeout = 300) {
+            let timer;
+            return (...args) => {
+                clearTimeout(timer);
+                timer = setTimeout(() => { func.apply(this, args); }, timeout);
+            };
+        }
+
+        async function lookupAddressMapbox(query) {
+            try {
+                const url = `https://api.mapbox.com/search/searchbox/v1/suggest?q=${encodeURIComponent(query)}&country=GB&session_token=${SEARCH_SESSION_TOKEN}&access_token=${MAPBOX_TOKEN}`;
+                const resp = await fetch(url);
+                const data = await resp.json();
+                return data.suggestions || [];
+            } catch (err) { return []; }
+        }
+
+        const handleLiveSearch = async () => {
+            const query = searchBox.value.trim();
+            customerMatchSelect.innerHTML = "";
+            clearBtn.style.display = query.length > 0 ? "block" : "none";
+
+            if (query.length < 2) {
+                customerMatchSelect.style.display = "none";
+                document.getElementById("customerAddSelectedBtn").style.display = "none";
+                return;
+            }
+
+            // 1. FILE SEARCH (LOCAL DATA)
+            if (customerData.length > 0) {
+                const matches = customerData.filter(l => l.toLowerCase().includes(query.toLowerCase()));
+                
+                // AUTOMATIC ADD: If exactly 1 match is found in the file
+                if (matches.length === 1) {
+                    processAndAddStop(matches[0]);
+                    clearSearchUI();
+                    return; 
+                }
+
+                matches.slice(0, 50).forEach(m => {
+                    const opt = document.createElement("option");
+                    opt.textContent = m;
+                    opt.value = m;
+                    customerMatchSelect.appendChild(opt);
+                });
+            } 
+            // 2. ONLINE SEARCH (MAPBOX)
+            else {
+                const results = await lookupAddressMapbox(query);
+
+                // AUTOMATIC ADD: If exactly 1 definitive suggestion is returned
+                if (results.length === 1) {
+                    const itemName = `${results[0].name} ${results[0].place_formatted || ''}`;
+                    await retrieveAndAddMapboxPoint(results[0].mapbox_id, itemName);
+                    clearSearchUI();
+                    return;
+                }
+
+                results.forEach(item => {
+                    const opt = document.createElement("option");
+                    opt.textContent = `${item.name} ${item.place_formatted || ''}`;
+                    opt.dataset.mapboxId = item.mapbox_id;
+                    opt.dataset.type = "mapbox";
+                    customerMatchSelect.appendChild(opt);
+                });
+            }
+
+            if (customerMatchSelect.options.length > 0) {
+                customerMatchSelect.style.display = "block";
+                document.getElementById("customerAddSelectedBtn").style.display = "block";
+            }
+        };
+
+        searchBox.addEventListener("input", debounce(handleLiveSearch, 300));
+
+        // Helper to get coordinates from Mapbox ID and add to map
+        async function retrieveAndAddMapboxPoint(mapboxId, name) {
+            try {
+                const url = `https://api.mapbox.com/search/searchbox/v1/retrieve/${mapboxId}?session_token=${SEARCH_SESSION_TOKEN}&access_token=${MAPBOX_TOKEN}`;
+                const resp = await fetch(url);
+                const data = await resp.json();
+                if (data.features && data.features.length > 0) {
+                    const [lon, lat] = data.features[0].geometry.coordinates;
+                    stops.splice(stops.length - 1, 0, { name: name, lat, lon });
+                    map.flyTo([lat, lon], 16);
+                    updateStopsTable(); 
+                    calculateRoute();
+                }
+            } catch (err) { console.error("Retrieve error", err); }
+        }
+
+        document.getElementById("customerAddSelectedBtn").addEventListener("click", async () => {
+            const selected = customerMatchSelect.options[customerMatchSelect.selectedIndex];
+            if (!selected) return;
+
+            if (selected.dataset.type === "mapbox") {
+                await retrieveAndAddMapboxPoint(selected.dataset.mapboxId, selected.textContent);
+            } else {
+                processAndAddStop(selected.value);
+            }
+            clearSearchUI();
+        });
+
+        function clearSearchUI() {
+            searchBox.value = "";
+            customerMatchSelect.style.display = "none";
+            document.getElementById("customerAddSelectedBtn").style.display = "none";
+            clearBtn.style.display = "none";
+        }
+
+        function processAndAddStop(rawData) {
+            let parts = rawData.replace(/"/g, '').split(/[\t,]+|\s{2,}/).filter(Boolean);
+            if (parts.length >= 3) {
+                let lat = parseFloat(parts[parts.length - 2]), lon = parseFloat(parts[parts.length - 1]);
+                stops.splice(stops.length - 1, 0, { name: parts.slice(0, -2).join(' '), lat, lon });
+                map.flyTo([lat, lon], 16);
+                updateStopsTable(); 
+                calculateRoute();
+            }
+        }
+
+        // --- CORE MAP & FILE FUNCTIONS ---
+
+        function updateStopsTable() {
+            stopsBody.innerHTML = stops.map((s, i) => {
+                const locked = (i === 0 || i === stops.length - 1);
+                return `<tr data-index="${i}"><td class="drag-handle">${i + 1}</td><td>${s.name}${locked ? " (fixed)" : ""}</td><td>${locked ? "" : '<input type="checkbox" class="deleteChk"/>'}</td></tr>`;
+            }).join("");
+            refreshMarkers();
+            initSortable();
+        }
+
+        function refreshMarkers() {
+            markers.forEach(m => map.removeLayer(m));
+            markers = [];
+            stops.forEach((s, i) => {
+                let color = (i === 0) ? "green" : (i === stops.length - 1) ? "red" : "rgba(0,123,255,0.7)";
+                const icon = L.divIcon({
+                    className: '',
+                    html: `<div class="marker-label" style="background:${color}">${i + 1}</div>`,
+                    iconSize: [30, 30], iconAnchor: [15, 15]
+                });
+                const marker = L.marker([s.lat, s.lon], { icon, draggable: !pointsLocked }).addTo(map);
+                marker.on('dragend', (e) => {
+                    const pos = e.target.getLatLng();
+                    stops[i].lat = pos.lat; stops[i].lon = pos.lng;
+                    calculateRoute();
+                });
+                markers.push(marker);
+            });
+        }
+
+        async function calculateRoute() {
+            if (routeLine) map.removeLayer(routeLine);
+            const toggle = document.getElementById("routingToggle");
+            const routeInfoEl = document.getElementById("routeInfo");
+            
+            document.getElementById("routingStatusLabel").textContent = toggle.checked ? "Route" : "Points Only";
+            
+            if (!toggle.checked || stops.length < 2) {
+                routeInfoEl.textContent = "";
+                return;
+            }
+
+            try {
+                let allCoords = [];
+                let totalDistance = 0;
+                let totalDuration = 0;
+
+                for (let i = 0; i < stops.length - 1; i += 24) {
+                    const chunk = stops.slice(i, i + 25);
+                    const coords = chunk.map(s => `${s.lon},${s.lat}`).join(';');
+                    const resp = await fetch(`https://api.mapbox.com/directions/v5/mapbox/driving-traffic/${coords}?geometries=geojson&overview=full&access_token=${MAPBOX_TOKEN}`);
+                    const data = await resp.json();
+                    
+                    if (data.routes?.[0]) {
+                        const route = data.routes[0];
+                        allCoords.push(...route.geometry.coordinates);
+                        totalDistance += route.distance;
+                        totalDuration += route.duration;
+                    }
+                }
+
+                currentRouteGeometry = { type: "LineString", coordinates: allCoords };
+                routeLine = L.geoJSON(currentRouteGeometry, { color: '#00008B', weight: 4 }).addTo(map);
+
+                const distMi = (totalDistance / 1609.34).toFixed(1);
+                const hrs = Math.floor(totalDuration / 3600);
+                const mins = Math.round((totalDuration % 3600) / 60);
+                routeInfoEl.textContent = `Total: ${distMi} mi, Time: ${hrs}h ${mins}m`;
+            } catch (err) { console.error("Routing error", err); }
+        }
+
+        function handleUniversalImport(event) {
+            const files = event.target.files;
+            document.getElementById("fileLabel").textContent = Array.from(files).map(f => f.name).join(', ');
+            Array.from(files).forEach(file => {
+                const reader = new FileReader();
+                reader.onload = e => {
+                    if (file.name.endsWith('.gpx')) importGPXLogic(e.target.result);
+                    else importTextLogic(e.target.result, file.name);
+                };
+                reader.readAsText(file);
+            });
+        }
+
+        function importTextLogic(content, fileName) {
+            customerData = content.split(/\r?\n/).filter(Boolean);
+            document.getElementById("customerFileInfo").textContent = `Loaded: ${fileName}`;
+        }
+
+        function importGPXLogic(content) {
+            const xml = new DOMParser().parseFromString(content, "text/xml");
+            const wpts = xml.getElementsByTagName("wpt");
+            const newStops = [];
+            for (let i = 0; i < wpts.length; i++) {
+                newStops.push({ 
+                    lat: parseFloat(wpts[i].getAttribute("lat")), 
+                    lon: parseFloat(wpts[i].getAttribute("lon")), 
+                    name: wpts[i].getElementsByTagName("name")[0]?.textContent || "Waypoint" 
+                });
+            }
+            stops = [stops[0], ...newStops, stops[stops.length - 1]];
+            updateStopsTable(); calculateRoute();
+        }
+
+        function initSortable() {
+            if (sortable) sortable.destroy();
+            sortable = Sortable.create(stopsBody, {
+                handle: '.drag-handle', animation: 150,
+                onEnd: () => {
+                    const newStops = [];
+                    stopsBody.querySelectorAll('tr[data-index]').forEach(row => newStops.push(stops[parseInt(row.dataset.index)]));
+                    stops = [newStops[0], ...newStops.slice(1, -1), newStops[newStops.length - 1]];
+                    updateStopsTable(); calculateRoute();
+                }
+            });
+        }
+
+        function addManualStop() {
+            const name = document.getElementById("manualName").value || "Manual Stop";
+            const lat = parseFloat(document.getElementById("manualLat").value);
+            const lon = parseFloat(document.getElementById("manualLon").value);
+            if (!isNaN(lat)) {
+                stops.splice(stops.length - 1, 0, { name, lat, lon });
+                updateStopsTable(); calculateRoute();
+                map.flyTo([lat, lon], 16);
+            }
+			document.getElementById('manualName').value = '';
+            document.getElementById("manualLat").value = '';
+            document.getElementById("manualLon").value = '';
+        }
+
+        function clearStops() {
+            stops = [WORK_START, WORK_STOP];
+            customerData = [];
+            document.getElementById('universalImport').value = '';
+            document.getElementById("fileLabel").textContent = "";
+            document.getElementById("customerFileInfo").textContent = "Search (File or Online):";
+            updateStopsTable(); calculateRoute();
+        }
+
+        function deleteSelectedStops() {
+            const checkboxes = stopsBody.querySelectorAll(".deleteChk:checked");
+            const indices = Array.from(checkboxes).map(cb => parseInt(cb.closest("tr").dataset.index));
+            stops = stops.filter((_, i) => !indices.includes(i));
+            updateStopsTable(); calculateRoute();
+        }
+
+        document.getElementById("sidebarToggle").addEventListener("click", () => {
+            const sb = document.getElementById("sidebar");
+            sb.classList.toggle("collapsed");
+            document.getElementById("sidebarToggle").innerHTML = sb.classList.contains("collapsed") ? '&#x25C0;' : '&#x25B6;';
+            setTimeout(() => map.invalidateSize(), 300);
+        });
+
+        document.getElementById("lockPointsToggle").addEventListener("change", function() {
+            pointsLocked = !this.checked;
+            document.getElementById("lockPointsLabel").textContent = pointsLocked ? "Locked" : "Unlocked";
+            refreshMarkers();
+        });
+		map.on("dblclick", e => {
+            stops.splice(stops.length - 1, 0, { lat: e.latlng.lat, lon: e.latlng.lng, name: "Stop " + (stops.length - 1) });
+            updateStopsTable(); calculateRoute();
+        });
+
+        function getTimestamp() {
+            const now = new Date();
+            return now.toISOString().split('T')[0] + "_" + now.getHours().toString().padStart(2, '0') + now.getMinutes().toString().padStart(2, '0');
+        }
+
+        async function saveFileWithBrowser(content, suggestedName) {
+            if ('showSaveFilePicker' in window) {
+                try {
+                    const handle = await window.showSaveFilePicker({
+                        suggestedName: suggestedName,
+                        types: [{ description: 'GPX File', accept: { 'application/gpx+xml': ['.gpx'] } }]
+                    });
+                    const writable = await handle.createWritable();
+                    await writable.write(content);
+                    await writable.close();
+                } catch (err) { if (err.name !== 'AbortError') downloadFallback(content, suggestedName); }
+            } else { downloadFallback(content, suggestedName); }
+        }
+
+        function downloadFallback(content, filename) {
+            const blob = new Blob([content], { type: 'application/gpx+xml' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url; a.download = filename;
+            document.body.appendChild(a); a.click();
+            document.body.removeChild(a); URL.revokeObjectURL(url);
+        }
+
+        function exportWaypoints() {
+            if (stops.length <= 2) return alert("No custom stops");
+            let gpx = '<?xml version="1.0" encoding="UTF-8"?><gpx version="1.1" creator="RoutePlannerPro" xmlns="http://www.topografix.com/GPX/1/1">\n';
+            gpx += `<metadata><name>Points ${getTimestamp()}</name></metadata>\n`;
+            stops.slice(1, -1).forEach(s => { gpx += `<wpt lat="${s.lat}" lon="${s.lon}"><name>${s.name}</name></wpt>\n`; });
+            gpx += '</gpx>';
+            saveFileWithBrowser(gpx, `${document.getElementById("exportFileName").value.trim() || "Points"}_${getTimestamp()}.gpx`);
+        }
+
+        function exportRoadTrack() {
+            if (!currentRouteGeometry) return alert("Turn Routing ON first");
+            let gpx = '<?xml version="1.0" encoding="UTF-8"?><gpx version="1.1" creator="RoutePlannerPro" xmlns="http://www.topografix.com/GPX/1/1">\n';
+            gpx += `<metadata><name>Track ${getTimestamp()}</name></metadata>\n<trk><name>Route</name><trkseg>\n`;
+            currentRouteGeometry.coordinates.forEach(c => { gpx += `<trkpt lat="${c[1]}" lon="${c[0]}"></trkpt>\n`; });
+            gpx += '</trkseg></trk></gpx>';
+            saveFileWithBrowser(gpx, `${document.getElementById("exportFileName").value.trim() || "Track"}_${getTimestamp()}.gpx`);
+        }
+		let qrScanner = null;
+
+function startQrScanner() {
+    const reader = document.getElementById("qr-reader");
+    reader.style.display = "block";
+
+    qrScanner = new Html5Qrcode("qr-reader");
+
+    qrScanner.start(
+        { facingMode: "environment" },
+        { fps: 10, qrbox: 250 },
+        (decodedText) => {
+            console.log("QR:", decodedText);
+
+            // OPTIONAL: support prefix
+            if (decodedText.startsWith("MAPBOX:")) {
+                decodedText = decodedText.replace("MAPBOX:", "");
+            }
+
+            // Set token
+            MAPBOX_TOKEN = decodedText;
+
+            alert("Mapbox API Key Loaded!");
+
+            stopQrScanner();
+        },
+        (error) => {
+            // ignore scan errors
+        }
+    ).catch(err => {
+        alert("Camera error: " + err);
+        stopQrScanner();
+    });
+}
+
+function stopQrScanner() {
+    if (qrScanner) {
+        qrScanner.stop().then(() => {
+            qrScanner.clear();
+        });
+        qrScanner = null;
+    }
+    document.getElementById("qr-reader").style.display = "none";
+}
+		
+		
+
+        updateStopsTable();
+    </script>
+	<!-- QR Scanner Overlay -->
+    <div id="qr-reader" style="
+        display:none;
+        position:fixed;
+        top:0;
+        left:0;
+        width:100%;
+        height:100%;
+        background:#000;
+        z-index:9999;
+    "></div>
+</body>
+</html>
