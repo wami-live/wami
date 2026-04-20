@@ -1,0 +1,1052 @@
+<!DOCTYPE html>
+<!--
+=======================================================
+  Route Planner Pro - Multi Edition
+=======================================================
+  Author      : Karl
+  Created     : 07-04-26
+  Version     : 1.1
+  Description : Route planning tool for use inside a
+                Android application and html browser.
+
+  Dependencies:
+    - Leaflet.js       (map rendering)
+    - SortableJS       (drag/drop stop reordering)
+    - Mapbox API       (routing + address search)
+
+  Added functions
+  Work / Home Location
+  Radius size from 50 to 600 (Uturns)
+  Editable stop names (click name in table to edit)
+  Confirm before Clear All
+  Stop count badge on sidebar toggle
+  Code checked by Claude 18-04-26
+=======================================================
+-->
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>Route Planner Pro - Multi Edition</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css"/>
+    <style>
+        html, body { margin:0; height:100%; width:100vw; overflow:hidden; font-family:sans-serif; background: #f9f9f9; }
+        #map { position:absolute; top:0; left:0; right:0; bottom:0; }
+        #sidebar {
+            position: fixed; top: 0; right: 0; width: 360px; height: 100vh;
+            background: #f9f9f9; border-left: 1px solid #ccc;
+            padding-top: calc(10px + env(safe-area-inset-top));
+            padding-left: 10px; padding-right: 10px;
+            padding-bottom: calc(10px + env(safe-area-inset-bottom));
+            box-sizing: border-box; z-index: 1000; transition: transform 0.3s ease; overflow-y: auto;
+        }
+        #sidebar.collapsed { transform: translateX(100%); }
+        #sidebarToggle {
+            width:36px; height:54px; background:#007bff; color:#fff; font-size:22px;
+            display:flex; align-items:center; justify-content:center; cursor:pointer;
+            border-radius:6px 0 0 6px; z-index:6000; position: fixed;
+            right: 360px; top: 50%; transform: translateY(-50%); transition: right 0.3s ease;
+        }
+        #sidebar.collapsed + #sidebarToggle { right: 0; }
+        #tableContainer { border: 1px solid #ccc; margin-top: 10px; height: auto; overflow: visible; }
+        #stopsTable { width:100%; border-collapse:collapse; font-size:12px; }
+        #stopsTable th, #stopsTable td { padding:3px 4px; border:1px solid #ccc; }
+        #stopsTable thead th { position: sticky; top:0; background:#f1f1f1; z-index:1; }
+        .drag-handle { cursor:grab; text-align:center; width:20px; font-weight:bold; }
+        .marker-label { color:#fff; border-radius:50%; width:24px; height:24px; line-height:24px; text-align:center; font-weight:bold; border:2px solid white; box-shadow:0 0 2px rgba(0,0,0,0.5);}
+        .location-dot { width: 10px; height: 10px; background: red; border-radius: 50%; }
+        .location-dot.flash { animation: flash 0.8s ease-out 2; }
+        @keyframes flash { 0% { opacity: 1; transform: scale(1); } 50% { opacity: 0.3; transform: scale(1.6); } 100% { opacity: 1; transform: scale(1); } }
+        .routing-switch-container { display: flex; align-items: center; gap: 10px; margin: 10px 0; padding: 8px; background: #eee; border-radius: 4px; font-size: 13px; }
+        .switch { position: relative; display: inline-block; width: 34px; height: 20px; }
+        .switch input { opacity: 0; width: 0; height: 0; }
+        .slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: #ccc; transition: .4s; border-radius: 20px; }
+        .slider:before { position: absolute; content: ""; height: 14px; width: 14px; left: 3px; bottom: 3px; background-color: white; transition: .4s; border-radius: 50%; }
+        input:checked + .slider { background-color: #3b82f6; }
+        input:checked + .slider:before { transform: translateX(14px); }
+        .btn-group { display: flex; gap: 4px; flex-wrap: wrap; margin-bottom: 10px; }
+        button { cursor: pointer; padding: 4px 8px; border-radius: 4px; border: 1px solid #ccc; background: #fff; }
+        .btn-blue { background: #3b82f6; color: white; border: none; font-weight: bold; }
+        .btn-blue:disabled { opacity: 0.4; cursor: not-allowed; }
+        .btn-success { background: #10b981; color: white; border: none; }
+        .search-wrapper { position: relative; width: 100%; margin-top: 4px; }
+        #clearSearchBtn {
+            position: absolute; right: 8px; top: 50%; transform: translateY(-50%);
+            border: none; background: transparent; color: #999; font-size: 20px;
+            cursor: pointer; display: none; padding: 0;
+        }
+        hr { border: 0; border-top: 1px solid #ccc; margin: 15px 0; }
+        .leaflet-popup-content-wrapper { border-radius: 6px; box-shadow: 0 2px 8px rgba(0,0,0,0.2); }
+        .stop-popup { font-family: sans-serif; font-size: 12px; min-width: 140px; }
+        .stop-popup .popup-name { font-weight: bold; font-size: 13px; margin-bottom: 6px; border-bottom: 1px solid #eee; padding-bottom: 4px; }
+        .stop-popup .popup-row { display: flex; justify-content: space-between; gap: 12px; padding: 2px 0; color: #555; }
+        .stop-popup .popup-row span:last-child { font-weight: 500; color: #222; }
+        #markerContextMenu { position: fixed; background: #fff; border: 1px solid #ccc; border-radius: 6px; box-shadow: 0 2px 8px rgba(0,0,0,0.2); z-index: 9999; min-width: 160px; padding: 4px 0; display: none; }
+        #markerContextMenu .ctx-item { padding: 8px 14px; font-size: 13px; cursor: pointer; color: #333; }
+        #markerContextMenu .ctx-item:hover { background: #f0f4ff; }
+        #markerContextMenu .ctx-item.ctx-delete { color: #dc2626; }
+        #markerContextMenu .ctx-item.ctx-delete:hover { background: #fff0f0; }
+
+        .stop-name { cursor: pointer; border-bottom: 1px dashed #aaa; }
+        .stop-name:hover { background: #fff8e1; border-radius: 2px; }
+        .stop-name-input { width: 100%; border: 1px solid #3b82f6; border-radius: 3px; padding: 1px 4px; font-size: 12px; box-sizing: border-box; }
+    </style>
+</head>
+<body>
+
+<div id="map"></div>
+
+<aside id="sidebar">
+
+    <!-- HAMBURGER BUTTON -->
+    <div style="position:relative; margin-bottom:6px;">
+
+        <button id="menuBtn" class="btn-blue" style="
+            width:100%;
+            padding:6px;
+            font-size:14px;
+            border-radius:4px;
+            cursor:pointer;
+            text-align:left;
+        ">
+            ☰ Options
+        </button>
+
+        <div id="dropdownMenu" style="
+            display:none;
+            position:absolute;
+            top:38px;
+            left:0;
+            width:100%;
+            background:#fff;
+            border:1px solid #ccc;
+            border-radius:6px;
+            box-shadow:0 2px 6px rgba(0,0,0,0.2);
+            z-index:2000;
+            padding:6px;
+        ">
+
+            <!-- Map Mode -->
+            <div class="menu-item" style="border-bottom:none;">
+                <div class="routing-switch-container">
+                    <strong>Map Mode:</strong>
+                    <label class="switch">
+                        <input type="checkbox" id="routingToggle" onchange="calculateRoute()">
+                        <span class="slider"></span>
+                    </label>
+                    <span id="routingStatusLabel">Points Only</span>
+                </div>
+            </div>
+
+            <!-- Lock Points -->
+            <div class="menu-item" style="border-bottom:none;">
+                <div class="routing-switch-container">
+                    <strong>Lock Points:</strong>
+                    <label class="switch">
+                        <input type="checkbox" id="lockPointsToggle">
+                        <span class="slider"></span>
+                    </label>
+                    <span id="lockPointsLabel">Locked</span>
+                </div>
+            </div>
+
+            <!-- Auto-Enter Points -->
+            <div class="menu-item" style="border-bottom:none;">
+                <div class="routing-switch-container">
+                    <strong>Auto Enter Points:</strong>
+                    <label class="switch">
+                        <input type="checkbox" id="autoEnterPointsToggle" checked>
+                        <span class="slider"></span>
+                    </label>
+                    <span id="autoPointsLabel">Auto</span>
+                </div>
+            </div>
+
+            <div class="menu-item" style="border-bottom:none;">
+                <div class="routing-switch-container">
+                    <strong>Start Set:</strong>
+                    <label class="switch">
+                        <input type="checkbox" id="startSetToggle">
+                        <span class="slider"></span>
+                    </label>
+                    <span id="startSetLabel">Work</span>
+                </div>
+            </div>
+
+            <div class="btn-group">
+                <button onclick="clearStops()">Clear All</button>
+                <button onclick="deleteSelectedStops()">Delete Selected</button>
+                <button onclick="reverseRoute()">Reverse Route</button>
+                <button type="button" class="btn-success" onclick="handleImportClick()">Import File</button>
+                <input type="file" id="universalImport" multiple accept=".gpx,.txt,.csv" style="display:none;" onchange="handleUniversalImport(event)">
+            </div>
+
+            <div class="export-settings">
+                <input type="text" id="exportFileName" placeholder="Export File name (optional)" style="width:100%; box-sizing:border-box; padding:4px; margin-bottom:8px;">
+                <div class="btn-group" style="margin-bottom:0;">
+                    <button id="btnSavePoints" class="btn-blue" onclick="exportWaypoints()">Save Points</button>
+                    <button id="btnSaveTrack"  class="btn-blue" onclick="exportRoadTrack()">Save Track</button>
+                </div>
+            </div>
+
+            <span id="fileLabel" style="font-size:11px; color:#555; display:block; margin-bottom:10px;"></span>
+            <button id="toggleLocation" style="width:100%; margin-bottom:10px;">Enable Current Location</button>
+            <button onclick="toggleTokenInput()" style="width:100%; margin-bottom:6px;">Enter Mapbox Token</button>
+            <div id="tokenInputArea" style="display:none; margin-bottom:10px;">
+                <input type="text" id="tokenPasteBox" placeholder="Paste token here (pk.ey...)" style="width:100%; box-sizing:border-box; padding:5px; font-size:12px; border:1px solid #3b82f6; border-radius:4px;">
+                <button onclick="applyPastedToken()" class="btn-blue" style="width:100%; margin-top:4px;">Apply Token</button>
+            </div>
+
+            <hr style="margin:6px 0;">
+
+            <input type="range" id="radiusSlider" min="0" max="5" step="1" value="3">
+            <span id="radiusLabel">300 Radius Value</span>
+
+        </div> <!-- dropdownMenu -->
+    </div> <!-- wrapper -->
+
+    <hr>
+    <div id="customerFileInfo" style="font-size:12px;color:#555; margin-bottom:4px;">Search (File or Online UK):</div>
+    <div class="search-wrapper">
+        <input type="text" id="customerSearchBox" placeholder="Start typing address..." style="width:100%; box-sizing:border-box; padding:6px 30px 6px 6px;">
+        <button id="clearSearchBtn">&times;</button>
+    </div>
+    <select id="customerMatchSelect" size="5" style="display:none; width:100%; margin-top:4px;"></select>
+    <button id="customerAddSelectedBtn" style="display:none; background:#f97316;color:white;padding:6px;border:none;border-radius:4px;cursor:pointer;margin-top:4px;width:100%;font-weight:bold;">Add Selected to Route</button>
+
+    <hr>
+    <input type="text" id="manualName" placeholder="Customer name / address" style="width:95%; padding:4px; margin-top:4px;">
+    <div style="display:flex; gap:4px; margin-top:4px;">
+        <input type="text" id="manualLat" placeholder="Latitude" style="width:45%; padding:4px;">
+        <input type="text" id="manualLon" placeholder="Longitude" style="width:45%; padding:4px;">
+    </div>
+    <button onclick="addManualStop()" style="margin-top:4px; width:100%;">Add to Route Manually</button>
+
+    <div id="tableContainer">
+        <table id="stopsTable">
+            <thead><tr><th>#</th><th>Name</th><th>At</th><th>Del</th></tr></thead>
+            <tbody id="stopsBody"></tbody>
+        </table>
+    </div>
+    <div id="routeInfo" style="margin-top:10px; font-weight:bold; color:#00008B; font-size:14px;"></div>
+</aside>
+
+<div id="sidebarToggle">&#x25B6; <span id="stopCount" style="font-size:12px; background:rgba(255,255,255,0.3); border-radius:10px; padding:1px 6px; margin-left:2px;">0</span></div>
+
+
+<div id="markerContextMenu">
+    <div class="ctx-item" id="ctxStopName" style="font-weight:bold; border-bottom:1px solid #eee; cursor:default;"></div>
+    <div class="ctx-item ctx-delete" id="ctxDelete">Delete this stop</div>
+</div>
+
+        <div id="qrStatus" style="font-size:12px; color:#555; margin-bottom:14px;">Scan a QR code containing your Mapbox token.</div>
+        <div style="margin-top:14px; display:flex; gap:8px; justify-content:center;">
+            <button id="qrScanBtn" class="btn-blue" style="padding:8px 18px; font-size:13px;">Scan QR Code</button>
+            <button id="qrCancelBtn" style="padding:8px 18px; font-size:13px;">Cancel</button>
+        </div>
+    </div>
+</div>
+
+<script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Sortable/1.15.0/Sortable.min.js"></script>
+
+<script>
+    // --- CONSTANTS ---
+    const WORK_START = { name: "Start", lat: 54.971630, lon: -2.949631 };
+    const WORK_END   = { name: "End",   lat: 54.971653, lon: -2.949319 };
+    const HOME_START = { name: "Start", lat: 54.940460, lon: -2.735322 };
+    const HOME_END   = { name: "End",   lat: 54.940529, lon: -2.735258 };
+    let MAPBOX_TOKEN = null;
+    const SEARCH_SESSION_TOKEN = crypto.randomUUID();
+
+    // --- CONFIG LOADER ---
+    async function loadConfig() {
+        try {
+            const resp = await fetch('https://ds923.duck-amberjack.ts.net/config.json');
+            if (!resp.ok) throw new Error("HTTP " + resp.status);
+            const data = await resp.json();
+            MAPBOX_TOKEN = data.mapboxToken;
+        } catch (err) {
+            console.error("Failed to load config:", err);
+            alert("Configuration could not be loaded. Please check your connection and refresh.");
+        }
+    }
+
+
+    // --- MAP INIT ---
+    const map = L.map('map').setView([54.58303, -2.56954], 6);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19 }).addTo(map);
+
+    // --- RADIUS SLIDER ---
+    const radiusValues = [50, 100, 200, 300, 400, 600];
+    const slider = document.getElementById("radiusSlider");
+    const radiusLabel = document.getElementById("radiusLabel");
+
+    slider.addEventListener("input", () => {
+        radiusLabel.textContent = `${radiusValues[slider.value]} Radius Value`;
+    });
+
+    // --- STATE ---
+    let stops = [WORK_START, WORK_END];
+    let customerData = [];
+    let markers = [];
+    let pointsLocked = true;
+    let routeLine = null;
+    let currentRouteGeometry = null;
+    let legTimes = [];
+    let sortable = null;
+
+    // --- DOM REFS ---
+    const stopsBody           = document.getElementById("stopsBody");
+    const routeInfoEl         = document.getElementById("routeInfo");
+    const customerMatchSelect = document.getElementById("customerMatchSelect");
+    const searchBox           = document.getElementById("customerSearchBox");
+    const clearSearchBtn      = document.getElementById("clearSearchBtn");
+    const autoToggle          = document.getElementById("autoEnterPointsToggle");
+    const autoLabel           = document.getElementById("autoPointsLabel");
+    const startToggle         = document.getElementById("startSetToggle");
+    const startLabel          = document.getElementById("startSetLabel");
+    const dropdownMenu        = document.getElementById("dropdownMenu");
+    const menuBtn             = document.getElementById("menuBtn");
+
+    // --- TOGGLE INIT ---
+    startLabel.textContent = startToggle.checked ? "Home" : "Work";
+    autoLabel.textContent  = autoToggle.checked  ? "Auto" : "Manual";
+
+    startToggle.addEventListener("change", () => {
+        const isHome = startToggle.checked;
+        startLabel.textContent = isHome ? "Home" : "Work";
+        const start = isHome ? HOME_START : WORK_START;
+        const end   = isHome ? HOME_END   : WORK_END;
+        const middleStops = stops.slice(1, -1);
+        stops = [start, ...middleStops, end];
+        updateStopsTable();
+        calculateRoute();
+    });
+
+    autoToggle.addEventListener("change", () => {
+        autoLabel.textContent = autoToggle.checked ? "Auto" : "Manual";
+    });
+
+    clearSearchBtn.addEventListener("click", (e) => {
+        e.preventDefault();
+        clearSearchUI();
+        searchBox.value = "";
+        searchBox.focus();
+    });
+
+    // --- EXPORT BUTTON STATE ---
+    function updateExportButtons() {
+        const btnPoints = document.getElementById("btnSavePoints");
+        const btnTrack  = document.getElementById("btnSaveTrack");
+        const hasStops  = stops.length > 2;
+        const hasRoute  = currentRouteGeometry !== null;
+        btnPoints.disabled = !hasStops;
+        btnTrack.disabled  = !hasRoute;
+    }
+
+    // --- SEARCH LOGIC ---
+    function debounce(func, timeout = 300) {
+        let timer;
+        return (...args) => {
+            clearTimeout(timer);
+            timer = setTimeout(() => { func.apply(this, args); }, timeout);
+        };
+    }
+
+    async function lookupAddressMapbox(query) {
+        try {
+            const url = `https://api.mapbox.com/search/searchbox/v1/suggest?q=${encodeURIComponent(query)}&country=GB&session_token=${SEARCH_SESSION_TOKEN}&access_token=${MAPBOX_TOKEN}`;
+            const resp = await fetch(url);
+            const data = await resp.json();
+            return data.suggestions || [];
+        } catch (err) { return []; }
+    }
+
+    const handleSearch = async () => {
+        const query = searchBox.value.trim();
+        customerMatchSelect.innerHTML = "";
+        clearSearchBtn.style.display = query.length > 0 ? "block" : "none";
+
+        if (query.length < 2) {
+            customerMatchSelect.style.display = "none";
+            document.getElementById("customerAddSelectedBtn").style.display = "none";
+            return;
+        }
+
+        if (customerData.length > 0) {
+            const matches = customerData.filter(l => l.toLowerCase().includes(query.toLowerCase()));
+
+            if (matches.length === 1 && autoToggle.checked) {
+                processAndAddStop(matches[0]);
+                clearSearchUI();
+                updateStopsTable();
+                calculateRoute();
+                return;
+            }
+
+            matches.slice(0, 50).forEach(m => {
+                const opt = document.createElement("option");
+                opt.textContent = m; opt.value = m;
+                customerMatchSelect.appendChild(opt);
+            });
+        } else {
+            const results = await lookupAddressMapbox(query);
+
+            if (results.length === 1 && autoToggle.checked) {
+                const itemName = `${results[0].name} ${results[0].place_formatted || ''}`;
+                await retrieveAndAddMapboxPoint(results[0].mapbox_id, itemName);
+                searchBox.blur();
+                clearSearchUI();
+                return;
+            }
+
+            results.forEach(item => {
+                const opt = document.createElement("option");
+                opt.textContent = `${item.name} ${item.place_formatted || ''}`;
+                opt.dataset.mapboxId = item.mapbox_id;
+                opt.dataset.type = "mapbox";
+                customerMatchSelect.appendChild(opt);
+            });
+        }
+
+        if (customerMatchSelect.options.length > 0) {
+            customerMatchSelect.style.display = "block";
+            document.getElementById("customerAddSelectedBtn").style.display = "block";
+        }
+    };
+
+    searchBox.addEventListener("input", debounce(handleSearch, 300));
+
+    async function retrieveAndAddMapboxPoint(mapboxId, label) {
+        try {
+            const url = `https://api.mapbox.com/search/searchbox/v1/retrieve/${mapboxId}?session_token=${SEARCH_SESSION_TOKEN}&access_token=${MAPBOX_TOKEN}`;
+            const resp = await fetch(url);
+            const data = await resp.json();
+            if (data.features?.[0]) {
+                const [lon, lat] = data.features[0].geometry.coordinates;
+                stops.splice(stops.length - 1, 0, { name: label, lat, lon });
+                map.flyTo([lat, lon], 16);
+                updateStopsTable();
+                calculateRoute();
+            }
+        } catch (err) { console.error("Retrieve error", err); }
+    }
+
+    document.getElementById("customerAddSelectedBtn").addEventListener("click", async () => {
+        const selected = customerMatchSelect.options[customerMatchSelect.selectedIndex];
+        if (!selected) return;
+
+        if (selected.dataset.type === "mapbox") {
+            await retrieveAndAddMapboxPoint(selected.dataset.mapboxId, selected.textContent);
+        } else {
+            processAndAddStop(selected.value);
+            updateStopsTable();
+            calculateRoute();
+        }
+        clearSearchUI();
+    });
+
+    function clearSearchUI() {
+        searchBox.value = "";
+        customerMatchSelect.style.display = "none";
+        document.getElementById("customerAddSelectedBtn").style.display = "none";
+        clearSearchBtn.style.display = "none";
+    }
+
+    function processAndAddStop(rawData) {
+        let parts = rawData.replace(/"/g, '').split(/[\t,]+|\s{2,}/).filter(Boolean);
+        if (parts.length >= 3) {
+            let lat = parseFloat(parts[parts.length - 2]);
+            let lon = parseFloat(parts[parts.length - 1]);
+            stops.splice(stops.length - 1, 0, { name: parts.slice(0, -2).join(' '), lat, lon });
+            map.flyTo([lat, lon], 16);
+        }
+    }
+
+    // --- ROUTE & MAP CORE ---
+    async function calculateRoute() {
+        if (routeLine) map.removeLayer(routeLine);
+        const toggle = document.getElementById("routingToggle");
+        document.getElementById("routingStatusLabel").textContent = toggle.checked ? "Route" : "Points Only";
+        legTimes = [];
+
+        if (!toggle.checked || stops.length < 2) {
+            routeInfoEl.textContent = "";
+            updateStopsTable();
+            return;
+        }
+
+        routeInfoEl.textContent = "Calculating...";
+
+        try {
+            let allCoords = [];
+            let totalDistance = 0;
+            let totalDuration = 0;
+
+            for (let i = 0; i < stops.length - 1; i += 24) {
+                const chunk = stops.slice(i, i + 25);
+                const coords = chunk.map(s => `${s.lon},${s.lat}`).join(';');
+
+                const selectedRadius = radiusValues[slider.value];
+                const radiuses = chunk.map(() => selectedRadius).join(';');
+
+                const resp = await fetch(
+                    `https://api.mapbox.com/directions/v5/mapbox/driving-traffic/${coords}` +
+                    `?geometries=geojson` +
+                    `&overview=full` +
+                    `&steps=true` +
+                    `&annotations=distance,duration` +
+                    `&continue_straight=false` +
+                    `&radiuses=${radiuses}` +
+                    `&access_token=${MAPBOX_TOKEN}`
+                );
+
+                const data = await resp.json();
+                if (!data.routes || !data.routes[0]) {
+                    console.error("Routing failed:", data);
+                    continue;
+                }
+
+                const route = data.routes[0];
+
+                route.legs.forEach((leg, idx) => {
+                    const globalIndex = i + idx;
+                    legTimes[globalIndex] = {
+                        duration: Math.round(leg.duration / 60),
+                        distance: (leg.distance / 1609.34).toFixed(1)
+                    };
+                });
+
+                allCoords.push(...route.geometry.coordinates);
+                totalDistance += route.distance;
+                totalDuration += route.duration;
+            }
+
+            currentRouteGeometry = { type: "LineString", coordinates: allCoords };
+            routeLine = L.geoJSON(currentRouteGeometry, { color: '#00008B', weight: 4 }).addTo(map);
+
+            const distMi = (totalDistance / 1609.34).toFixed(1);
+            const hrs    = Math.floor(totalDuration / 3600);
+            const mins   = Math.round((totalDuration % 3600) / 60);
+            routeInfoEl.textContent = `Total: ${distMi} mi, Time: ${hrs}h ${mins}m`;
+
+            updateStopsTable();
+            updateExportButtons();
+
+            setTimeout(() => {
+                map.invalidateSize();
+                map.fitBounds(routeLine.getBounds(), {
+                    padding: [50, 50],
+                    maxZoom: 14
+                });
+            }, 300);
+
+        } catch (err) {
+            console.error("Routing error", err);
+            routeInfoEl.textContent = "Routing failed. Please try again.";
+        }
+    }
+
+    // --- UI & FILE HELPERS ---
+    function getTimestamp() {
+        const now = new Date();
+        const pad = (n) => n.toString().padStart(2, '0');
+        return `${pad(now.getDate())}-${pad(now.getMonth() + 1)}-${now.getFullYear().toString().slice(-2)}-${pad(now.getHours())}-${pad(now.getMinutes())}`;
+    }
+
+    function handleImportClick() {
+        dropdownMenu.style.display = "none";
+        document.getElementById('universalImport').click();
+    }
+
+    function handleUniversalImport(event) {
+        const files = event.target.files;
+        if (!files.length) return;
+        document.getElementById("fileLabel").textContent = Array.from(files).map(f => f.name).join(', ');
+        Array.from(files).forEach(file => {
+            const reader = new FileReader();
+            const ext = file.name.split('.').pop().toLowerCase();
+            reader.onload = e => {
+                if (ext === 'gpx') importGPXLogic(e.target.result);
+                else importTextLogic(e.target.result, file.name);
+            };
+            reader.readAsText(file);
+        });
+    }
+
+    function importGPXLogic(content) {
+        const xml = new DOMParser().parseFromString(content, "text/xml");
+        const wpts = xml.getElementsByTagName("wpt");
+        const newStops = [];
+        for (let i = 0; i < wpts.length; i++) {
+            newStops.push({
+                lat: parseFloat(wpts[i].getAttribute("lat")),
+                lon: parseFloat(wpts[i].getAttribute("lon")),
+                name: wpts[i].getElementsByTagName("name")[0]?.textContent || "Waypoint"
+            });
+        }
+        stops = [stops[0], ...newStops, stops[stops.length - 1]];
+        updateStopsTable();
+        calculateRoute();
+    }
+
+    function importTextLogic(content, fileName) {
+        customerData = content.split(/\r?\n/).filter(Boolean);
+        document.getElementById("customerFileInfo").textContent = `Loaded: ${fileName}`;
+    }
+
+    map.doubleClickZoom.disable();
+    map.on('dblclick', function (e) {
+        stops.splice(stops.length - 1, 0, { name: "Stop " + stops.length, lat: e.latlng.lat, lon: e.latlng.lng });
+        updateStopsTable();
+        calculateRoute();
+    });
+
+    // --- STOPS TABLE ---
+    function updateStopsTable() {
+        // Build cumulative distances array
+        let cumulative = 0;
+        const cumDist = stops.map((s, i) => {
+            if (i === 0) return 0;
+            const leg = legTimes[i - 1];
+            if (leg) cumulative += parseFloat(leg.distance);
+            return leg ? parseFloat(cumulative.toFixed(1)) : null;
+        });
+
+        stopsBody.innerHTML = stops.map((s, i) => {
+            const locked = (i === 0 || i === stops.length - 1);
+            const leg = legTimes[i - 1];
+            const timeText = leg ? ` - ${leg.duration} min (${leg.distance} mi)` : "";
+            const cumText = i === 0 ? "0 mi" : (cumDist[i] !== null ? `${cumDist[i]} mi` : "-");
+            return `<tr data-index="${i}">
+                <td class="drag-handle">${i + 1}</td>
+                <td>${locked
+                    ? `${s.name} (fixed)${timeText}`
+                    : `<span class="stop-name" data-index="${i}" title="Click to edit">${s.name}</span>${timeText}`
+                }</td>
+                <td style="font-size:11px; color:#555; white-space:nowrap;">${cumText}</td>
+                <td>${locked ? "" : '<input type="checkbox" class="deleteChk"/>'}</td>
+            </tr>`;
+        }).join("");
+
+        refreshMarkers();
+        initSortable();
+        updateExportButtons();
+        document.getElementById("stopCount").textContent = stops.length - 2;
+        saveSession();
+    }
+
+    // --- EDITABLE STOP NAMES ---
+    document.getElementById("stopsBody").addEventListener("click", (e) => {
+        const span = e.target.closest(".stop-name");
+        if (!span) return;
+
+        const idx = parseInt(span.dataset.index);
+        const currentName = stops[idx].name;
+
+        const input = document.createElement("input");
+        input.type = "text";
+        input.className = "stop-name-input";
+        input.value = currentName;
+
+        span.replaceWith(input);
+        input.focus();
+        input.select();
+
+        function commitEdit() {
+            const newName = input.value.trim() || currentName;
+            stops[idx].name = newName;
+            updateStopsTable();
+        }
+
+        input.addEventListener("blur", commitEdit);
+        input.addEventListener("keydown", (e) => {
+            if (e.key === "Enter")  { input.blur(); }
+            if (e.key === "Escape") { stops[idx].name = currentName; updateStopsTable(); }
+        });
+    });
+
+    function refreshMarkers() {
+        markers.forEach(m => map.removeLayer(m));
+        markers = [];
+        stops.forEach((s, i) => {
+            let color = (i === 0) ? "green" : (i === stops.length - 1) ? "red" : "rgba(0,123,255,0.7)";
+            const icon = L.divIcon({
+                className: '',
+                html: `<div class="marker-label" style="background:${color}">${i + 1}</div>`,
+                iconSize: [30, 30], iconAnchor: [15, 15]
+            });
+            const marker = L.marker([s.lat, s.lon], { icon, draggable: !pointsLocked }).addTo(map);
+
+            // Build popup content
+            const leg = legTimes[i - 1];
+            const nextLeg = legTimes[i];
+            let popupHtml = `<div class="stop-popup">`;
+            popupHtml += `<div class="popup-name">${s.name}</div>`;
+            if (i === 0) {
+                popupHtml += `<div class="popup-row"><span>Start point</span></div>`;
+                if (nextLeg) popupHtml += `<div class="popup-row"><span>To next stop</span><span>${nextLeg.distance} mi / ${nextLeg.duration} min</span></div>`;
+            } else if (i === stops.length - 1) {
+                popupHtml += `<div class="popup-row"><span>End point</span></div>`;
+                if (leg) popupHtml += `<div class="popup-row"><span>From previous</span><span>${leg.distance} mi / ${leg.duration} min</span></div>`;
+            } else {
+                if (leg) popupHtml += `<div class="popup-row"><span>From previous</span><span>${leg.distance} mi / ${leg.duration} min</span></div>`;
+                if (nextLeg) popupHtml += `<div class="popup-row"><span>To next stop</span><span>${nextLeg.distance} mi / ${nextLeg.duration} min</span></div>`;
+                if (!leg && !nextLeg) popupHtml += `<div class="popup-row"><span>No route data yet</span></div>`;
+            }
+            popupHtml += `</div>`;
+            marker.bindPopup(popupHtml, { offset: [0, -12], maxWidth: 220 });
+
+            marker.on('contextmenu', (e) => {
+                if (i === 0 || i === stops.length - 1) return;
+                showMarkerContextMenu(e.originalEvent, i, s.name);
+            });
+            marker.on('dragend', (event) => {
+                const pos = event.target.getLatLng();
+                stops[i].lat = pos.lat;
+                stops[i].lon = pos.lng;
+                calculateRoute();
+            });
+            markers.push(marker);
+        });
+    }
+
+
+    // --- MARKER CONTEXT MENU ---
+    let ctxTargetIndex = null;
+    const markerContextMenu = document.getElementById("markerContextMenu");
+
+    function showMarkerContextMenu(e, stopIndex, stopName) {
+        e.preventDefault();
+        e.stopPropagation();
+        ctxTargetIndex = stopIndex;
+        document.getElementById("ctxStopName").textContent = stopName;
+        markerContextMenu.style.display = "block";
+        const menuW = markerContextMenu.offsetWidth;
+        const menuH = markerContextMenu.offsetHeight;
+        const x = Math.min(e.clientX, window.innerWidth  - menuW - 8);
+        const y = Math.min(e.clientY, window.innerHeight - menuH - 8);
+        markerContextMenu.style.left = x + "px";
+        markerContextMenu.style.top  = y + "px";
+    }
+
+    function hideMarkerContextMenu() {
+        markerContextMenu.style.display = "none";
+        ctxTargetIndex = null;
+    }
+
+    document.getElementById("ctxDelete").addEventListener("click", () => {
+        if (ctxTargetIndex === null) return;
+        stops.splice(ctxTargetIndex, 1);
+        if (stops.length <= 2) {
+            const toggle = document.getElementById("routingToggle");
+            toggle.checked = false;
+            document.getElementById("routingStatusLabel").textContent = "Points Only";
+            currentRouteGeometry = null;
+            if (routeLine) { map.removeLayer(routeLine); routeLine = null; }
+        }
+        hideMarkerContextMenu();
+        updateStopsTable();
+        calculateRoute();
+    });
+
+    document.addEventListener("click",       hideMarkerContextMenu);
+    document.addEventListener("contextmenu", (e) => { if (!markerContextMenu.contains(e.target)) hideMarkerContextMenu(); });
+    map.on("click",     hideMarkerContextMenu);
+    map.on("movestart", hideMarkerContextMenu);
+
+    function initSortable() {
+        if (sortable) sortable.destroy();
+        sortable = Sortable.create(stopsBody, {
+            handle: '.drag-handle',
+            animation: 150,
+            filter: 'tr:first-child, tr:last-child',
+            preventOnFilter: true,
+            onMove: function(evt) {
+                const items = stopsBody.querySelectorAll('tr');
+                const lastIndex = items.length - 1;
+                if (evt.related === items[0] || evt.related === items[lastIndex]) {
+                    return false;
+                }
+            },
+            onEnd: () => {
+                const newStops = [];
+                stopsBody.querySelectorAll('tr[data-index]').forEach(row => newStops.push(stops[parseInt(row.dataset.index)]));
+                stops = [newStops[0], ...newStops.slice(1, -1), newStops[newStops.length - 1]];
+                updateStopsTable();
+                calculateRoute();
+            }
+        });
+    }
+
+    // --- BASE64 (chunked to avoid call stack limit on large tracks) ---
+    function toBase64(str) {
+        const bytes = new TextEncoder().encode(str);
+        let binary = '';
+        const chunkSize = 8192;
+        for (let i = 0; i < bytes.length; i += chunkSize) {
+            binary += String.fromCharCode(...bytes.subarray(i, i + chunkSize));
+        }
+        return btoa(binary);
+    }
+
+    // --- EXPORT (Android data URI / Windows Save As dialog / fallback Blob) ---
+    async function exportFile(content, filename) {
+        if (/Android/i.test(navigator.userAgent)) {
+            const androidName = filename.replace(/\.gpx$/i, '');
+            window.location.href = `data:application/gpx+xml;name=${androidName};base64,${toBase64(content)}`;
+            return;
+        }
+        if (window.showSaveFilePicker) {
+            try {
+                const fileHandle = await window.showSaveFilePicker({
+                    suggestedName: filename,
+                    types: [{ description: 'GPX File', accept: { 'application/gpx+xml': ['.gpx'] } }]
+                });
+                const writable = await fileHandle.createWritable();
+                await writable.write(content);
+                await writable.close();
+            } catch (err) {
+                if (err.name !== 'AbortError') {
+                    console.error("Save failed:", err);
+                    alert("Save failed: " + err.message);
+                }
+            }
+        } else {
+            const blob = new Blob([content], { type: 'application/gpx+xml' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        }
+    }
+
+    async function exportWaypoints() {
+        if (stops.length <= 2) return alert("No custom stops to export.");
+        const ts = getTimestamp();
+        const baseName = document.getElementById("exportFileName").value.trim() || "Points";
+        let gpx = '<?xml version="1.0" encoding="UTF-8"?>\n<gpx version="1.1" creator="RoutePlannerPro" xmlns="http://www.topografix.com/GPX/1/1">\n';
+        gpx += '  <metadata>\n    <name>Points ' + ts + '</name>\n  </metadata>\n';
+        stops.slice(1, -1).forEach(s => {
+            gpx += `  <wpt lat="${s.lat}" lon="${s.lon}"><name>${s.name}</name></wpt>\n`;
+        });
+        gpx += '</gpx>';
+        await exportFile(gpx, `${baseName}_${ts}.gpx`);
+    }
+
+    async function exportRoadTrack() {
+        if (!currentRouteGeometry) return alert("Turn Routing ON first to generate a track.");
+        const ts = getTimestamp();
+        const baseName = document.getElementById("exportFileName").value.trim() || "Track";
+        let gpx = '<?xml version="1.0" encoding="UTF-8"?>\n<gpx version="1.1" creator="RoutePlannerPro" xmlns="http://www.topografix.com/GPX/1/1">\n';
+        gpx += '  <metadata>\n    <name>Track ' + ts + '</name>\n  </metadata>\n';
+        gpx += '  <trk><name>Route</name><trkseg>\n';
+        currentRouteGeometry.coordinates.forEach(c => {
+            gpx += `    <trkpt lat="${c[1]}" lon="${c[0]}"></trkpt>\n`;
+        });
+        gpx += '  </trkseg></trk>\n</gpx>';
+        await exportFile(gpx, `${baseName}_${ts}.gpx`);
+    }
+
+    function addManualStop() {
+        const name = document.getElementById("manualName").value.trim() || "Manual Stop";
+        const lat  = parseFloat(document.getElementById("manualLat").value);
+        const lon  = parseFloat(document.getElementById("manualLon").value);
+        if (!isNaN(lat) && !isNaN(lon)) {
+            stops.splice(stops.length - 1, 0, { name, lat, lon });
+            updateStopsTable();
+            calculateRoute();
+            map.flyTo([lat, lon], 16);
+        } else {
+            alert("Invalid coordinates. Please enter valid Latitude and Longitude values.");
+        }
+        document.getElementById('manualName').value = '';
+        document.getElementById("manualLat").value = '';
+        document.getElementById("manualLon").value = '';
+    }
+
+    function clearStops() {
+        if (!confirm("Clear all stops and reset the route?")) return;
+        dropdownMenu.style.display = "none";
+        const isHome = startToggle.checked;
+        const start = isHome ? HOME_START : WORK_START;
+        const end   = isHome ? HOME_END   : WORK_END;
+        stops = [start, end];
+        customerData = [];
+        currentRouteGeometry = null;
+        clearSession();
+        document.getElementById('universalImport').value = '';
+        document.getElementById("fileLabel").textContent = "";
+        document.getElementById("customerFileInfo").textContent = "Search (File or Online UK):";
+        const toggle = document.getElementById("routingToggle");
+        toggle.checked = false;
+        document.getElementById("routingStatusLabel").textContent = "Points Only";
+        updateStopsTable();
+        calculateRoute();
+    }
+
+    function deleteSelectedStops() {
+        dropdownMenu.style.display = "none";
+        const checkboxes = stopsBody.querySelectorAll(".deleteChk:checked");
+        const indices = Array.from(checkboxes).map(cb => parseInt(cb.closest("tr").dataset.index));
+        stops = stops.filter((_, i) => !indices.includes(i));
+
+        if (stops.length <= 2) {
+            const toggle = document.getElementById("routingToggle");
+            toggle.checked = false;
+            document.getElementById("routingStatusLabel").textContent = "Points Only";
+            currentRouteGeometry = null;
+            if (routeLine) { map.removeLayer(routeLine); routeLine = null; }
+        }
+
+        updateStopsTable();
+        calculateRoute();
+    }
+
+    function reverseRoute() {
+        if (stops.length <= 2) return;
+        dropdownMenu.style.display = "none";
+        stops = [stops[0], ...stops.slice(1, -1).reverse(), stops[stops.length - 1]];
+        updateStopsTable();
+        calculateRoute();
+    }
+
+    // --- SIDEBAR TOGGLE ---
+    document.getElementById("sidebarToggle").addEventListener("click", () => {
+        const sb = document.getElementById("sidebar");
+        sb.classList.toggle("collapsed");
+        const isCollapsed = sb.classList.contains("collapsed");
+        const count = document.getElementById("stopCount").textContent;
+        document.getElementById("sidebarToggle").innerHTML = isCollapsed
+            ? `&#x25C0; <span id="stopCount" style="font-size:12px; background:rgba(255,255,255,0.3); border-radius:10px; padding:1px 6px; margin-left:2px;">${count}</span>`
+            : `&#x25B6; <span id="stopCount" style="font-size:12px; background:rgba(255,255,255,0.3); border-radius:10px; padding:1px 6px; margin-left:2px;">${count}</span>`;
+        setTimeout(() => map.invalidateSize(), 300);
+    });
+
+    // --- LOCATION TRACKING ---
+    let locMarker = null, watchId = null;
+    document.getElementById("toggleLocation").addEventListener("click", () => {
+        if (watchId) {
+            navigator.geolocation.clearWatch(watchId);
+            watchId = null;
+            if (locMarker) map.removeLayer(locMarker);
+            document.getElementById("toggleLocation").textContent = "Enable Current Location";
+        } else {
+            watchId = navigator.geolocation.watchPosition(p => {
+                const lat = p.coords.latitude, lon = p.coords.longitude;
+                if (locMarker) locMarker.setLatLng([lat, lon]);
+                else {
+                    locMarker = L.marker([lat, lon], {
+                        icon: L.divIcon({ className: '', html: '<div class="location-dot flash"></div>', iconSize: [10, 10] })
+                    }).addTo(map);
+                    map.setView([lat, lon], 14);
+                }
+            }, null, { enableHighAccuracy: true });
+            document.getElementById("toggleLocation").textContent = "Disable Current Location";
+        }
+    });
+
+    // --- LOCK POINTS TOGGLE ---
+    document.getElementById("lockPointsToggle").addEventListener("change", function () {
+        pointsLocked = !this.checked;
+        document.getElementById("lockPointsLabel").textContent = pointsLocked ? "Locked" : "Unlocked";
+        refreshMarkers();
+    });
+
+    // --- HAMBURGER MENU ---
+    menuBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        dropdownMenu.style.display = dropdownMenu.style.display === "block" ? "none" : "block";
+    });
+
+    document.addEventListener("click", (e) => {
+        if (!menuBtn.contains(e.target) && !dropdownMenu.contains(e.target)) {
+            dropdownMenu.style.display = "none";
+        }
+    });
+
+    // --- SESSION STORAGE ---
+    function saveSession() {
+        try {
+            localStorage.setItem('routePlanner_stops', JSON.stringify(stops));
+            localStorage.setItem('routePlanner_startToggle', startToggle.checked);
+        } catch (err) {
+            console.warn("Could not save session:", err);
+        }
+    }
+
+    function restoreSession() {
+        try {
+            const saved = localStorage.getItem('routePlanner_stops');
+            const savedStart = localStorage.getItem('routePlanner_startToggle');
+            if (!saved) return false;
+            const parsed = JSON.parse(saved);
+            if (!Array.isArray(parsed) || parsed.length < 2) return false;
+            if (savedStart !== null) {
+                const isHome = savedStart === 'true';
+                startToggle.checked = isHome;
+                startLabel.textContent = isHome ? "Home" : "Work";
+            }
+            stops = parsed;
+            return true;
+        } catch (err) {
+            console.warn("Could not restore session:", err);
+            return false;
+        }
+    }
+
+    function clearSession() {
+        try {
+            localStorage.removeItem('routePlanner_stops');
+            localStorage.removeItem('routePlanner_startToggle');
+        } catch (err) {
+            console.warn("Could not clear session:", err);
+        }
+    }
+
+    // --- MANUAL TOKEN ENTRY ---
+    function toggleTokenInput() {
+        const area = document.getElementById("tokenInputArea");
+        area.style.display = area.style.display === "none" ? "block" : "none";
+        if (area.style.display === "block") {
+            document.getElementById("tokenPasteBox").focus();
+        }
+    }
+
+    function applyPastedToken() {
+        const raw = document.getElementById("tokenPasteBox").value.trim();
+        let token = null;
+        try {
+            const parsed = JSON.parse(raw);
+            token = parsed.mapboxToken || parsed.token || null;
+        } catch (e) {
+            if (raw.startsWith("pk.")) token = raw;
+        }
+        if (token) {
+            MAPBOX_TOKEN = token;
+            document.getElementById("tokenPasteBox").value = "";
+            document.getElementById("tokenInputArea").style.display = "none";
+            dropdownMenu.style.display = "none";
+            updateStopsTable();
+            alert("Token applied successfully.");
+        } else {
+            alert("Invalid token. It should start with pk.ey...");
+        }
+    }
+
+    // --- INIT ---
+    loadConfig().then(() => {
+        const restored = restoreSession();
+        if (restored) {
+            console.log("Session restored:", stops.length, "stops");
+        }
+        updateStopsTable();
+    });
+</script>
+</body>
+</html>
