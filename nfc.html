@@ -23,9 +23,7 @@ body {
     text-align: center;
 }
 
-h1 {
-    margin-bottom: 25px;
-}
+h1 { margin-bottom: 25px; }
 
 .status {
     margin-bottom: 20px;
@@ -69,11 +67,22 @@ h1 {
     color: white;
 }
 
-/* Feedback */
+/* Open page button */
+.open-btn {
+    margin-top: 15px;
+    width: 100%;
+    font-size: 20px;
+    padding: 18px;
+    border-radius: 12px;
+    border: none;
+    background: #28a745;
+    color: white;
+}
+
+/* Flash */
 .flash {
     animation: flash 0.5s;
 }
-
 @keyframes flash {
     0% { background: #28a745; }
     100% { background: #121212; }
@@ -100,6 +109,8 @@ h1 {
         <button onclick="selectAll()">Select All</button>
         <button onclick="copyText()">Copy</button>
     </div>
+
+    <button class="open-btn" onclick="openRoute()">Open Route Page</button>
 </div>
 
 <script>
@@ -119,7 +130,10 @@ async function readNFC() {
                 const text = decoder.decode(record.data);
 
                 output.value = text;
-                status.textContent = "✅ NFC read successful";
+                status.textContent = "✅ NFC read + copied";
+
+                // ✅ AUTO COPY
+                navigator.clipboard.writeText(text);
 
                 // Flash + vibration
                 document.body.classList.add("flash");
@@ -134,14 +148,14 @@ async function readNFC() {
     }
 }
 
-// Select all text
+// Select all
 function selectAll() {
     const output = document.getElementById("output");
     output.focus();
     output.select();
 }
 
-// Copy to clipboard
+// Manual copy
 function copyText() {
     const output = document.getElementById("output");
     const status = document.getElementById("status");
@@ -157,10 +171,12 @@ function copyText() {
                 status.textContent = "Ready";
                 status.classList.remove("copied");
             }, 1500);
-        })
-        .catch(() => {
-            status.textContent = "❌ Copy failed";
         });
+}
+
+// Open your route page
+function openRoute() {
+    window.location.href = "https://wami-live.github.io/wami/autoroute";
 }
 </script>
 
