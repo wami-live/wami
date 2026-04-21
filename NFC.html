@@ -1,21 +1,140 @@
-<button onclick="readNFC()">Scan NFC</button>
-<input type="text" id="output" />
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>NFC Scanner</title>
+
+<style>
+body {
+    margin: 0;
+    font-family: Arial, sans-serif;
+    background: #121212;
+    color: white;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 100vh;
+}
+
+/* Container */
+.container {
+    width: 90%;
+    max-width: 420px;
+    text-align: center;
+}
+
+/* Title */
+h1 {
+    font-size: 28px;
+    margin-bottom: 30px;
+}
+
+/* Status text */
+.status {
+    font-size: 18px;
+    margin-bottom: 20px;
+    opacity: 0.8;
+}
+
+/* Big scan button */
+.scan-btn {
+    font-size: 26px;
+    padding: 25px;
+    width: 100%;
+    border: none;
+    border-radius: 15px;
+    background: #007bff;
+    color: white;
+    cursor: pointer;
+    transition: 0.2s;
+}
+
+.scan-btn:active {
+    transform: scale(0.98);
+}
+
+/* Output box */
+.output {
+    margin-top: 25px;
+    padding: 15px;
+    font-size: 20px;
+    width: 100%;
+    border-radius: 10px;
+    border: none;
+    text-align: center;
+}
+
+/* Success flash */
+.success {
+    animation: flash 0.6s;
+}
+
+@keyframes flash {
+    0%   { background-color: #28a745; }
+    100% { background-color: #121212; }
+}
+
+/* Error state */
+.error {
+    color: #ff4d4d;
+}
+</style>
+</head>
+
+<body>
+
+<div class="container">
+    <h1>📡 NFC Scanner</h1>
+
+    <div id="status" class="status">Tap scan to start</div>
+
+    <button class="scan-btn" onclick="readNFC()">Scan NFC</button>
+
+    <input id="output" class="output" placeholder="Waiting for scan..." readonly>
+</div>
 
 <script>
 async function readNFC() {
+    const status = document.getElementById("status");
+    const output = document.getElementById("output");
+
     try {
+        status.textContent = "Hold your phone near NFC tag...";
+        status.classList.remove("error");
+
         const ndef = new NDEFReader();
         await ndef.scan();
 
         ndef.onreading = event => {
             const decoder = new TextDecoder();
+
             for (const record of event.message.records) {
-                document.getElementById("output").value =
-                    decoder.decode(record.data);
+                const text = decoder.decode(record.data);
+
+                output.value = text;
+                status.textContent = "✅ NFC tag read successfully";
+
+                // Success flash
+                document.body.classList.add("success");
+                setTimeout(() => {
+                    document.body.classList.remove("success");
+                }, 600);
+
+                // Vibration (if supported)
+                if (navigator.vibrate) {
+                    navigator.vibrate(200);
+                }
             }
         };
+
     } catch (error) {
-        alert("NFC Error: " + error);
+        status.textContent = "❌ NFC error: " + error;
+        status.classList.add("error");
     }
 }
 </script>
+
+</body>
+</html>
