@@ -1038,6 +1038,33 @@
             alert("Invalid token. It should start with pk.ey...");
         }
     }
+	// --- NFC DATA HANDLER ---
+function handleNfcData() {
+    const data = sessionStorage.getItem("nfcData");
+
+    if (!data) return;
+
+    console.log("NFC Data received:", data);
+
+    const tokenBox = document.getElementById("tokenPasteBox");
+
+    if (tokenBox) {
+        // Put data into the token box
+        tokenBox.value = data;
+
+        // Open the token input UI (so user sees it)
+        document.getElementById("tokenInputArea").style.display = "block";
+
+        // OPTIONAL: auto-apply token
+        applyPastedToken();
+
+        // OPTIONAL: vibration feedback
+        if (navigator.vibrate) navigator.vibrate(100);
+    }
+
+    // IMPORTANT: clear after use so it doesn't repeat
+    sessionStorage.removeItem("nfcData");
+}
 
     // --- INIT ---
     loadConfig().then(() => {
@@ -1046,6 +1073,8 @@
             console.log("Session restored:", stops.length, "stops");
         }
         updateStopsTable();
+		// 🔥 ADD THIS LINE
+    handleNfcData();
     });
 </script>
 </body>
