@@ -1,0 +1,21 @@
+<button onclick="readNFC()">Scan NFC</button>
+<input type="text" id="output" />
+
+<script>
+async function readNFC() {
+    try {
+        const ndef = new NDEFReader();
+        await ndef.scan();
+
+        ndef.onreading = event => {
+            const decoder = new TextDecoder();
+            for (const record of event.message.records) {
+                document.getElementById("output").value =
+                    decoder.decode(record.data);
+            }
+        };
+    } catch (error) {
+        alert("NFC Error: " + error);
+    }
+}
+</script>
