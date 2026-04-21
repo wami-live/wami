@@ -12,33 +12,26 @@ body {
     background: #121212;
     color: white;
     display: flex;
-    flex-direction: column;
-    align-items: center;
     justify-content: center;
+    align-items: center;
     height: 100vh;
 }
 
-/* Container */
 .container {
     width: 90%;
     max-width: 420px;
     text-align: center;
 }
 
-/* Title */
 h1 {
-    font-size: 28px;
-    margin-bottom: 30px;
+    margin-bottom: 25px;
 }
 
-/* Status text */
 .status {
-    font-size: 18px;
     margin-bottom: 20px;
     opacity: 0.8;
 }
 
-/* Big scan button */
 .scan-btn {
     font-size: 26px;
     padding: 25px;
@@ -47,17 +40,10 @@ h1 {
     border-radius: 15px;
     background: #007bff;
     color: white;
-    cursor: pointer;
-    transition: 0.2s;
 }
 
-.scan-btn:active {
-    transform: scale(0.98);
-}
-
-/* Output box */
 .output {
-    margin-top: 25px;
+    margin-top: 20px;
     padding: 15px;
     font-size: 20px;
     width: 100%;
@@ -66,19 +52,35 @@ h1 {
     text-align: center;
 }
 
-/* Success flash */
-.success {
-    animation: flash 0.6s;
+/* Action buttons */
+.actions {
+    display: flex;
+    gap: 10px;
+    margin-top: 15px;
+}
+
+.actions button {
+    flex: 1;
+    font-size: 18px;
+    padding: 15px;
+    border-radius: 10px;
+    border: none;
+    background: #444;
+    color: white;
+}
+
+/* Feedback */
+.flash {
+    animation: flash 0.5s;
 }
 
 @keyframes flash {
-    0%   { background-color: #28a745; }
-    100% { background-color: #121212; }
+    0% { background: #28a745; }
+    100% { background: #121212; }
 }
 
-/* Error state */
-.error {
-    color: #ff4d4d;
+.copied {
+    color: #28a745;
 }
 </style>
 </head>
@@ -93,6 +95,11 @@ h1 {
     <button class="scan-btn" onclick="readNFC()">Scan NFC</button>
 
     <input id="output" class="output" placeholder="Waiting for scan..." readonly>
+
+    <div class="actions">
+        <button onclick="selectAll()">Select All</button>
+        <button onclick="copyText()">Copy</button>
+    </div>
 </div>
 
 <script>
@@ -101,9 +108,7 @@ async function readNFC() {
     const output = document.getElementById("output");
 
     try {
-        status.textContent = "Hold your phone near NFC tag...";
-        status.classList.remove("error");
-
+        status.textContent = "Hold near NFC tag...";
         const ndef = new NDEFReader();
         await ndef.scan();
 
@@ -114,25 +119,48 @@ async function readNFC() {
                 const text = decoder.decode(record.data);
 
                 output.value = text;
-                status.textContent = "✅ NFC tag read successfully";
+                status.textContent = "✅ NFC read successful";
 
-                // Success flash
-                document.body.classList.add("success");
-                setTimeout(() => {
-                    document.body.classList.remove("success");
-                }, 600);
+                // Flash + vibration
+                document.body.classList.add("flash");
+                setTimeout(() => document.body.classList.remove("flash"), 500);
 
-                // Vibration (if supported)
-                if (navigator.vibrate) {
-                    navigator.vibrate(200);
-                }
+                if (navigator.vibrate) navigator.vibrate(200);
             }
         };
 
-    } catch (error) {
-        status.textContent = "❌ NFC error: " + error;
-        status.classList.add("error");
+    } catch (err) {
+        status.textContent = "❌ NFC error: " + err;
     }
+}
+
+// Select all text
+function selectAll() {
+    const output = document.getElementById("output");
+    output.focus();
+    output.select();
+}
+
+// Copy to clipboard
+function copyText() {
+    const output = document.getElementById("output");
+    const status = document.getElementById("status");
+
+    navigator.clipboard.writeText(output.value)
+        .then(() => {
+            status.textContent = "📋 Copied to clipboard";
+            status.classList.add("copied");
+
+            if (navigator.vibrate) navigator.vibrate(100);
+
+            setTimeout(() => {
+                status.textContent = "Ready";
+                status.classList.remove("copied");
+            }, 1500);
+        })
+        .catch(() => {
+            status.textContent = "❌ Copy failed";
+        });
 }
 </script>
 
