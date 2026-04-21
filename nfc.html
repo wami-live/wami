@@ -124,24 +124,24 @@ async function readNFC() {
         await ndef.scan();
 
         ndef.onreading = event => {
-            const decoder = new TextDecoder();
+    const decoder = new TextDecoder();
 
-            for (const record of event.message.records) {
-                const text = decoder.decode(record.data);
+    for (const record of event.message.records) {
+        const text = decoder.decode(record.data);
 
-                output.value = text;
-                status.textContent = "✅ NFC read + copied";
+        // Save to sessionStorage
+        sessionStorage.setItem("nfcData", text);
 
-                // ✅ AUTO COPY
-                navigator.clipboard.writeText(text);
+        // Optional: still show it locally
+        output.value = text;
 
-                // Flash + vibration
-                document.body.classList.add("flash");
-                setTimeout(() => document.body.classList.remove("flash"), 500);
+        // Optional: vibration
+        if (navigator.vibrate) navigator.vibrate(200);
 
-                if (navigator.vibrate) navigator.vibrate(200);
-            }
-        };
+        // Redirect to your route page
+        window.location.href = "https://wami-live.github.io/wami/autoroute";
+    }
+};
 
     } catch (err) {
         status.textContent = "❌ NFC error: " + err;
