@@ -56,6 +56,40 @@
         .drag-handle { cursor:grab; text-align:center; width:20px; font-weight:bold; }
         .marker-label { color:#fff; border-radius:50%; width:24px; height:24px; line-height:24px; text-align:center; font-weight:bold; border:2px solid white; box-shadow:0 0 2px rgba(0,0,0,0.5);}
         .location-dot { width: 10px; height: 10px; background: red; border-radius: 50%; }
+        #locationPin {
+    display: none;
+    position: fixed;
+    left: 50%;
+    top: 50%;
+    transform: translate(-50%, -50%);
+    width: 28px;
+    height: 28px;
+    z-index: 5000;
+    pointer-events: none;
+}
+
+/* Outer red ring (donut) */
+#locationPin::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border: 2px solid red;
+    border-radius: 50%;
+    background: transparent;
+}
+
+/* Crosshair lines */
+#locationPin::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background:
+        linear-gradient(red, red),
+        linear-gradient(red, red);
+    background-size: 1px 50%, 50% 1px;
+    background-position: center;
+    background-repeat: no-repeat;
+}
         .location-dot.flash { animation: flash 0.8s ease-out 2; }
         @keyframes flash { 0% { opacity: 1; transform: scale(1); } 50% { opacity: 0.3; transform: scale(1.6); } 100% { opacity: 1; transform: scale(1); } }
         .routing-switch-container { display: flex; align-items: center; gap: 10px; margin: 10px 0; padding: 8px; background: #eee; border-radius: 4px; font-size: 13px; }
@@ -95,6 +129,7 @@
 <body>
 
 <div id="map"></div>
+<div id="locationPin"></div>
 
 <aside id="sidebar">
 
@@ -922,53 +957,31 @@
         setTimeout(() => map.invalidateSize(), 300);
     });
 
-    // --- LOCATION TRACKING (follows map while driving) ---
-    let locMarker = null, watchId = null, followLocation = false;
-
-    // Stop following if user manually pans the map
-    map.on("dragstart", () => {
-        if (followLocation) {
-            followLocation = false;
-            const btn = document.getElementById("toggleLocation");
-            if (btn.textContent === "Disable Current Location") {
-                btn.textContent = "Resume Following";
-            }
-        }
-    });
+    // --- LOCATION TRACKING ---
+    // The blue dot is a fixed CSS element centred on screen.
+    // The map pans underneath it on every GPS update.
+    let watchId = null;
+    const locationPin = document.getElementById("locationPin");
 
     document.getElementById("toggleLocation").addEventListener("click", () => {
         const btn = document.getElementById("toggleLocation");
 
-        // Resume following if paused by a drag
-        if (btn.textContent === "Resume Following") {
-            followLocation = true;
-            btn.textContent = "Disable Current Location";
-            return;
-        }
-
         if (watchId) {
-            // Turn off entirely
+            // Turn off
             navigator.geolocation.clearWatch(watchId);
             watchId = null;
-            followLocation = false;
-            if (locMarker) { map.removeLayer(locMarker); locMarker = null; }
+            locationPin.style.display = "none";
             btn.textContent = "Enable Current Location";
         } else {
-            // Turn on and start following
-            followLocation = true;
+            // Turn on — show pin and start panning map on every update
+            locationPin.style.display = "block";
             watchId = navigator.geolocation.watchPosition(p => {
                 const lat = p.coords.latitude, lon = p.coords.longitude;
-                if (locMarker) {
-                    locMarker.setLatLng([lat, lon]);
-                } else {
-                    locMarker = L.marker([lat, lon], {
-                        icon: L.divIcon({ className: '', html: '<div class="location-dot flash"></div>', iconSize: [10, 10] })
-                    }).addTo(map);
-                }
-                if (followLocation) {
-                    map.setView([lat, lon], map.getZoom() < 14 ? 14 : map.getZoom());
-                }
-            }, null, { enableHighAccuracy: true, maximumAge: 0, timeout: 10000 });
+                map.setView([lat, lon], map.getZoom() < 14 ? 14 : map.getZoom(), { animate: true });
+            }, (err) => {
+                console.error("Location error:", err);
+                alert("Unable to get location: " + err.message);
+            }, { enableHighAccuracy: true, maximumAge: 0, timeout: 10000 });
             btn.textContent = "Disable Current Location";
         }
     });
