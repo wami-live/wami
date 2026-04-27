@@ -22,150 +22,254 @@
   Stop count badge on sidebar toggle
   Map follows current location while driving
   Code checked by Claude 18-04-26
+  Mapbox API key paste code 20-04-26
+  Route_Planner_Commented 25-04-26 Claude Code
 =======================================================
 -->
 <html lang="en">
 <head>
     <meta charset="UTF-8">
+    <!-- Prevent zoom/scaling on mobile; viewport-fit=cover fills the safe area on notched phones -->
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
     <title>Route Planner Pro - Multi Edition</title>
+
+    <!-- Leaflet CSS: styles the map tiles, popups, zoom controls, etc. -->
     <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css"/>
+
     <style>
+        /* ── Root layout ─────────────────────────────────────────── */
+        /* Make html/body fill the full screen with no scroll or margin */
         html, body { margin:0; height:100%; width:100vw; overflow:hidden; font-family:sans-serif; background: #f9f9f9; }
+
+        /* The Leaflet map fills the entire viewport behind everything else */
         #map { position:absolute; top:0; left:0; right:0; bottom:0; }
+
+        /* ── Sidebar panel ───────────────────────────────────────── */
         #sidebar {
-            position: fixed; top: 0; right: 0; width: 360px; height: 100vh;
-            background: #f9f9f9; border-left: 1px solid #ccc;
+            position: fixed;          /* Stays in place as the map pans */
+            top: 0; right: 0;         /* Anchored to the top-right corner */
+            width: 360px;
+            height: 100vh;            /* Full viewport height */
+            background: #f9f9f9;
+            border-left: 1px solid #ccc;
+            /* env() accounts for notch/home-bar on iOS */
             padding-top: calc(10px + env(safe-area-inset-top));
             padding-left: 10px; padding-right: 10px;
             padding-bottom: calc(10px + env(safe-area-inset-bottom));
-            box-sizing: border-box; z-index: 1000; transition: transform 0.3s ease; overflow-y: auto;
+            box-sizing: border-box;   /* Padding included in width calculation */
+            z-index: 1000;            /* Sits above the map layer */
+            transition: transform 0.3s ease; /* Smooth slide in/out animation */
+            overflow-y: auto;         /* Scrollable when content overflows */
         }
+
+        /* When .collapsed is added, slide the sidebar fully off-screen to the right */
         #sidebar.collapsed { transform: translateX(100%); }
+
+        /* ── Sidebar toggle arrow tab ────────────────────────────── */
         #sidebarToggle {
-            width:36px; height:54px; background:#007bff; color:#fff; font-size:22px;
-            display:flex; align-items:center; justify-content:center; cursor:pointer;
-            border-radius:6px 0 0 6px; z-index:6000; position: fixed;
-            right: 360px; top: 50%; transform: translateY(-50%); transition: right 0.3s ease;
+            width:36px; height:54px;
+            background:#007bff; color:#fff; font-size:22px;
+            display:flex; align-items:center; justify-content:center;
+            cursor:pointer;
+            border-radius:6px 0 0 6px; /* Rounded on the left side only */
+            z-index:6000;              /* Above sidebar (z-index 1000) */
+            position: fixed;
+            right: 360px;             /* Flush against the sidebar's left edge */
+            top: 50%;                 /* Vertically centred */
+            transform: translateY(-50%);
+            transition: right 0.3s ease; /* Moves left/right with sidebar animation */
         }
+        /* When sidebar is collapsed, move the toggle tab to the screen edge */
         #sidebar.collapsed + #sidebarToggle { right: 0; }
+
+        /* ── Stops table container ───────────────────────────────── */
         #tableContainer { border: 1px solid #ccc; margin-top: 10px; height: auto; overflow: visible; }
+
+        /* Compact table showing the list of route stops */
         #stopsTable { width:100%; border-collapse:collapse; font-size:12px; }
         #stopsTable th, #stopsTable td { padding:3px 4px; border:1px solid #ccc; }
+
+        /* Sticky header so column labels stay visible when the table scrolls */
         #stopsTable thead th { position: sticky; top:0; background:#f1f1f1; z-index:1; }
+
+        /* Drag handle column — shows a grab cursor to hint at drag-to-reorder */
         .drag-handle { cursor:grab; text-align:center; width:20px; font-weight:bold; }
-        .marker-label { color:#fff; border-radius:50%; width:24px; height:24px; line-height:24px; text-align:center; font-weight:bold; border:2px solid white; box-shadow:0 0 2px rgba(0,0,0,0.5);}
+
+        /* Numbered circle rendered on each map marker */
+        .marker-label {
+            color:#fff; border-radius:50%;
+            width:24px; height:24px; line-height:24px;
+            text-align:center; font-weight:bold;
+            border:2px solid white;
+            box-shadow:0 0 2px rgba(0,0,0,0.5);
+        }
+
+        /* Small red dot used for the live GPS position indicator */
         .location-dot { width: 10px; height: 10px; background: red; border-radius: 50%; }
+
+        /* ── Live location crosshair pin ─────────────────────────── */
+        /* Fixed to the exact centre of the screen; pointer-events:none so
+           it doesn't block map interaction underneath */
         #locationPin {
-    display: none;
-    position: fixed;
-    left: 50%;
-    top: 50%;
-    transform: translate(-50%, -50%);
-    width: 28px;
-    height: 28px;
-    z-index: 5000;
-    pointer-events: none;
-}
+            display: none;            /* Hidden until "Enable Current Location" is clicked */
+            position: fixed;
+            left: 50%; top: 50%;
+            transform: translate(-50%, -50%); /* True centre regardless of element size */
+            width: 28px; height: 28px;
+            z-index: 5000;
+            pointer-events: none;     /* Clicks pass through to the map */
+        }
 
-/* Outer red ring (donut) */
-#locationPin::before {
-    content: "";
-    position: absolute;
-    inset: 0;
-    border: 2px solid red;
-    border-radius: 50%;
-    background: transparent;
-}
+        /* Outer red ring drawn with a border pseudo-element */
+        #locationPin::before {
+            content: "";
+            position: absolute;
+            inset: 0;                 /* Fills the parent element */
+            border: 2px solid red;
+            border-radius: 50%;       /* Makes it circular */
+            background: transparent;
+        }
 
-/* Crosshair lines */
-#locationPin::after {
-    content: "";
-    position: absolute;
-    inset: 0;
-    background:
-        linear-gradient(red, red),
-        linear-gradient(red, red);
-    background-size: 1px 50%, 50% 1px;
-    background-position: center;
-    background-repeat: no-repeat;
-}
+        /* Crosshair lines drawn with two perpendicular gradient fills */
+        #locationPin::after {
+            content: "";
+            position: absolute;
+            inset: 0;
+            background:
+                linear-gradient(red, red),   /* Vertical bar */
+                linear-gradient(red, red);   /* Horizontal bar */
+            background-size: 1px 50%, 50% 1px;
+            background-position: center;
+            background-repeat: no-repeat;
+        }
+
+        /* Flash animation played when location first locks (draws attention) */
         .location-dot.flash { animation: flash 0.8s ease-out 2; }
-        @keyframes flash { 0% { opacity: 1; transform: scale(1); } 50% { opacity: 0.3; transform: scale(1.6); } 100% { opacity: 1; transform: scale(1); } }
-        .routing-switch-container { display: flex; align-items: center; gap: 10px; margin: 10px 0; padding: 8px; background: #eee; border-radius: 4px; font-size: 13px; }
+        @keyframes flash {
+            0%   { opacity: 1; transform: scale(1); }
+            50%  { opacity: 0.3; transform: scale(1.6); }
+            100% { opacity: 1; transform: scale(1); }
+        }
+
+        /* ── Toggle switch rows inside the Options menu ──────────── */
+        .routing-switch-container {
+            display: flex; align-items: center; gap: 10px;
+            margin: 10px 0; padding: 8px;
+            background: #eee; border-radius: 4px; font-size: 13px;
+        }
+
+        /* iOS-style toggle switch shell */
         .switch { position: relative; display: inline-block; width: 34px; height: 20px; }
-        .switch input { opacity: 0; width: 0; height: 0; }
-        .slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: #ccc; transition: .4s; border-radius: 20px; }
-        .slider:before { position: absolute; content: ""; height: 14px; width: 14px; left: 3px; bottom: 3px; background-color: white; transition: .4s; border-radius: 50%; }
-        input:checked + .slider { background-color: #3b82f6; }
-        input:checked + .slider:before { transform: translateX(14px); }
+        .switch input { opacity: 0; width: 0; height: 0; } /* Hidden checkbox drives the state */
+
+        /* The grey track; turns blue when the checkbox is :checked */
+        .slider {
+            position: absolute; cursor: pointer;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background-color: #ccc;
+            transition: .4s; border-radius: 20px;
+        }
+
+        /* The white thumb circle that slides right when toggled on */
+        .slider:before {
+            position: absolute; content: "";
+            height: 14px; width: 14px;
+            left: 3px; bottom: 3px;
+            background-color: white;
+            transition: .4s; border-radius: 50%;
+        }
+        input:checked + .slider { background-color: #3b82f6; }           /* Blue track when ON */
+        input:checked + .slider:before { transform: translateX(14px); }  /* Thumb moves right */
+
+        /* ── Misc layout helpers ─────────────────────────────────── */
         .btn-group { display: flex; gap: 4px; flex-wrap: wrap; margin-bottom: 10px; }
         button { cursor: pointer; padding: 4px 8px; border-radius: 4px; border: 1px solid #ccc; background: #fff; }
         .btn-blue { background: #3b82f6; color: white; border: none; font-weight: bold; }
-        .btn-blue:disabled { opacity: 0.4; cursor: not-allowed; }
+        .btn-blue:disabled { opacity: 0.4; cursor: not-allowed; } /* Visual cue when export is unavailable */
         .btn-success { background: #10b981; color: white; border: none; }
+
+        /* Search box wrapper — positions the × clear button inside the input */
         .search-wrapper { position: relative; width: 100%; margin-top: 4px; }
         #clearSearchBtn {
             position: absolute; right: 8px; top: 50%; transform: translateY(-50%);
             border: none; background: transparent; color: #999; font-size: 20px;
-            cursor: pointer; display: none; padding: 0;
+            cursor: pointer; display: none; /* Hidden until the user types something */
+            padding: 0;
         }
+
         hr { border: 0; border-top: 1px solid #ccc; margin: 15px 0; }
+
+        /* ── Leaflet popup styling ────────────────────────────────── */
         .leaflet-popup-content-wrapper { border-radius: 6px; box-shadow: 0 2px 8px rgba(0,0,0,0.2); }
+
+        /* Two-column info card inside each marker popup */
         .stop-popup { font-family: sans-serif; font-size: 12px; min-width: 140px; }
         .stop-popup .popup-name { font-weight: bold; font-size: 13px; margin-bottom: 6px; border-bottom: 1px solid #eee; padding-bottom: 4px; }
         .stop-popup .popup-row { display: flex; justify-content: space-between; gap: 12px; padding: 2px 0; color: #555; }
         .stop-popup .popup-row span:last-child { font-weight: 500; color: #222; }
-        #markerContextMenu { position: fixed; background: #fff; border: 1px solid #ccc; border-radius: 6px; box-shadow: 0 2px 8px rgba(0,0,0,0.2); z-index: 9999; min-width: 160px; padding: 4px 0; display: none; }
+
+        /* ── Right-click context menu on markers ─────────────────── */
+        #markerContextMenu {
+            position: fixed; background: #fff;
+            border: 1px solid #ccc; border-radius: 6px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+            z-index: 9999;            /* Must sit above everything */
+            min-width: 160px; padding: 4px 0;
+            display: none;            /* Hidden until a marker is right-clicked */
+        }
         #markerContextMenu .ctx-item { padding: 8px 14px; font-size: 13px; cursor: pointer; color: #333; }
         #markerContextMenu .ctx-item:hover { background: #f0f4ff; }
-        #markerContextMenu .ctx-item.ctx-delete { color: #dc2626; }
+        #markerContextMenu .ctx-item.ctx-delete { color: #dc2626; }         /* Red for destructive action */
         #markerContextMenu .ctx-item.ctx-delete:hover { background: #fff0f0; }
+
+        /* ── Inline editable stop names in the table ─────────────── */
+        /* Dashed underline hints the cell value is clickable/editable */
         .stop-name { cursor: pointer; border-bottom: 1px dashed #aaa; }
         .stop-name:hover { background: #fff8e1; border-radius: 2px; }
-        .stop-name-input { width: 100%; border: 1px solid #3b82f6; border-radius: 3px; padding: 1px 4px; font-size: 12px; box-sizing: border-box; }
+
+        /* Text input that replaces the span when editing is active */
+        .stop-name-input {
+            width: 100%; border: 1px solid #3b82f6;
+            border-radius: 3px; padding: 1px 4px;
+            font-size: 12px; box-sizing: border-box;
+        }
     </style>
 </head>
 <body>
 
+<!-- The Leaflet map renders into this div, filling the full background -->
 <div id="map"></div>
+
+<!-- Fixed crosshair centred on screen — visible only during live location tracking -->
 <div id="locationPin"></div>
 
+<!-- ── SIDEBAR ──────────────────────────────────────────────────────── -->
 <aside id="sidebar">
 
-    <!-- HAMBURGER BUTTON -->
+    <!-- ── HAMBURGER / OPTIONS MENU ──────────────────────────────────── -->
     <div style="position:relative; margin-bottom:6px;">
 
+        <!-- Button that toggles the dropdown menu open/closed -->
         <button id="menuBtn" class="btn-blue" style="
-            width:100%;
-            padding:6px;
-            font-size:14px;
-            border-radius:4px;
-            cursor:pointer;
-            text-align:left;
-        ">
+            width:100%; padding:6px; font-size:14px;
+            border-radius:4px; cursor:pointer; text-align:left;">
             ☰ Options
         </button>
 
+        <!-- Dropdown panel — hidden by default, shown when menuBtn is clicked -->
         <div id="dropdownMenu" style="
             display:none;
-            position:absolute;
-            top:38px;
-            left:0;
-            width:100%;
-            background:#fff;
-            border:1px solid #ccc;
-            border-radius:6px;
+            position:absolute; top:38px; left:0; width:100%;
+            background:#fff; border:1px solid #ccc; border-radius:6px;
             box-shadow:0 2px 6px rgba(0,0,0,0.2);
-            z-index:2000;
-            padding:6px;
-        ">
+            z-index:2000; padding:6px;">
 
-            <!-- Map Mode -->
+            <!-- Toggle: Points Only vs Route mode (calls Mapbox Directions API) -->
             <div class="menu-item" style="border-bottom:none;">
                 <div class="routing-switch-container">
                     <strong>Map Mode:</strong>
                     <label class="switch">
+                        <!-- onchange fires calculateRoute() every time this is flipped -->
                         <input type="checkbox" id="routingToggle" onchange="calculateRoute()">
                         <span class="slider"></span>
                     </label>
@@ -173,7 +277,7 @@
                 </div>
             </div>
 
-            <!-- Lock Points -->
+            <!-- Toggle: Locked = markers cannot be dragged; Unlocked = draggable -->
             <div class="menu-item" style="border-bottom:none;">
                 <div class="routing-switch-container">
                     <strong>Lock Points:</strong>
@@ -185,7 +289,7 @@
                 </div>
             </div>
 
-            <!-- Auto-Enter Points -->
+            <!-- Toggle: Auto mode adds a stop immediately when only one search result exists -->
             <div class="menu-item" style="border-bottom:none;">
                 <div class="routing-switch-container">
                     <strong>Auto Enter Points:</strong>
@@ -197,6 +301,7 @@
                 </div>
             </div>
 
+            <!-- Toggle: switches the fixed start/end pins between Work and Home coordinates -->
             <div class="menu-item" style="border-bottom:none;">
                 <div class="routing-switch-container">
                     <strong>Start Set:</strong>
@@ -208,120 +313,223 @@
                 </div>
             </div>
 
+            <!-- Route management actions -->
             <div class="btn-group">
-                <button onclick="clearStops()">Clear All</button>
-                <button onclick="deleteSelectedStops()">Delete Selected</button>
-                <button onclick="reverseRoute()">Reverse Route</button>
+                <button onclick="clearStops()">Clear All</button>           <!-- Resets to just start/end -->
+                <button onclick="deleteSelectedStops()">Delete Selected</button> <!-- Removes checked rows -->
+                <button onclick="reverseRoute()">Reverse Route</button>     <!-- Flips middle stops order -->
+                <!-- Import triggers the hidden file input below -->
                 <button type="button" class="btn-success" onclick="handleImportClick()">Import File</button>
-                <input type="file" id="universalImport" multiple accept=".gpx,.txt,.csv" style="display:none;" onchange="handleUniversalImport(event)">
+                <!-- Hidden file input: accepts .gpx (waypoints), .txt and .csv (customer lists) -->
+                <input type="file" id="universalImport" multiple accept=".gpx,.txt,.csv"
+                       style="display:none;" onchange="handleUniversalImport(event)">
             </div>
 
+            <!-- Export section: optional filename + two export buttons -->
             <div class="export-settings">
-                <input type="text" id="exportFileName" placeholder="Export File name (optional)" style="width:100%; box-sizing:border-box; padding:4px; margin-bottom:8px;">
+                <input type="text" id="exportFileName"
+                       placeholder="Export File name (optional)"
+                       style="width:100%; box-sizing:border-box; padding:4px; margin-bottom:8px;">
                 <div class="btn-group" style="margin-bottom:0;">
+                    <!-- Save Points: exports stop coordinates as GPX waypoints -->
                     <button id="btnSavePoints" class="btn-blue" onclick="exportWaypoints()">Save Points</button>
+                    <!-- Save Track: exports the full road-following polyline as a GPX track -->
                     <button id="btnSaveTrack"  class="btn-blue" onclick="exportRoadTrack()">Save Track</button>
                 </div>
             </div>
 
+            <!-- Shows the name(s) of any imported file(s) -->
             <span id="fileLabel" style="font-size:11px; color:#555; display:block; margin-bottom:10px;"></span>
+
+            <!-- Starts/stops the GPS watchPosition that keeps the map centred on the user -->
             <button id="toggleLocation" style="width:100%; margin-bottom:10px;">Enable Current Location</button>
+
+            <!-- Shows/hides the manual Mapbox token entry area -->
             <button onclick="toggleTokenInput()" style="width:100%; margin-bottom:6px;">Enter Mapbox Token</button>
+
+            <!-- Token paste area — hidden until the button above is clicked -->
             <div id="tokenInputArea" style="display:none; margin-bottom:10px;">
-                <input type="text" id="tokenPasteBox" placeholder="Paste token here (pk.ey...)" style="width:100%; box-sizing:border-box; padding:5px; font-size:12px; border:1px solid #3b82f6; border-radius:4px;">
+                <input type="text" id="tokenPasteBox"
+                       placeholder="Paste token here (pk.ey...)"
+                       style="width:100%; box-sizing:border-box; padding:5px; font-size:12px;
+                              border:1px solid #3b82f6; border-radius:4px;">
                 <button onclick="applyPastedToken()" class="btn-blue" style="width:100%; margin-top:4px;">Apply Token</button>
             </div>
 
             <hr style="margin:6px 0;">
 
+            <!-- Radius slider: controls how far from each waypoint Mapbox will snap the route.
+                 A larger radius helps avoid U-turns at close waypoints. -->
             <input type="range" id="radiusSlider" min="0" max="5" step="1" value="3">
             <span id="radiusLabel">300 Radius Value</span>
 
-        </div> <!-- dropdownMenu -->
-    </div> <!-- wrapper -->
+        </div><!-- /dropdownMenu -->
+    </div><!-- /hamburger wrapper -->
 
     <hr>
+
+    <!-- Label shows "Search (File or Online UK)" or the loaded filename -->
     <div id="customerFileInfo" style="font-size:12px;color:#555; margin-bottom:4px;">Search (File or Online UK):</div>
+
+    <!-- Address search box with inline clear (×) button -->
     <div class="search-wrapper">
-        <input type="text" id="customerSearchBox" placeholder="Start typing address..." style="width:100%; box-sizing:border-box; padding:6px 30px 6px 6px;">
-        <button id="clearSearchBtn">&times;</button>
+        <input type="text" id="customerSearchBox"
+               placeholder="Start typing address..."
+               style="width:100%; box-sizing:border-box; padding:6px 30px 6px 6px;">
+        <button id="clearSearchBtn">&times;</button> <!-- Clears search box and results -->
     </div>
+
+    <!-- Dropdown list of search matches (from file or Mapbox Suggest API) -->
     <select id="customerMatchSelect" size="5" style="display:none; width:100%; margin-top:4px;"></select>
-    <button id="customerAddSelectedBtn" style="display:none; background:#f97316;color:white;padding:6px;border:none;border-radius:4px;cursor:pointer;margin-top:4px;width:100%;font-weight:bold;">Add Selected to Route</button>
+
+    <!-- Button appears below the list so the user can add the highlighted item to the route -->
+    <button id="customerAddSelectedBtn"
+            style="display:none; background:#f97316;color:white;padding:6px;
+                   border:none;border-radius:4px;cursor:pointer;margin-top:4px;
+                   width:100%;font-weight:bold;">Add Selected to Route</button>
 
     <hr>
-    <input type="text" id="manualName" placeholder="Customer name / address" style="width:95%; padding:4px; margin-top:4px;">
+
+    <!-- Manual coordinate entry — useful when address search is unavailable or imprecise -->
+    <input type="text" id="manualName" placeholder="Customer name / address"
+           style="width:95%; padding:4px; margin-top:4px;">
     <div style="display:flex; gap:4px; margin-top:4px;">
-        <input type="text" id="manualLat" placeholder="Latitude" style="width:45%; padding:4px;">
+        <input type="text" id="manualLat" placeholder="Latitude"  style="width:45%; padding:4px;">
         <input type="text" id="manualLon" placeholder="Longitude" style="width:45%; padding:4px;">
     </div>
     <button onclick="addManualStop()" style="margin-top:4px; width:100%;">Add to Route Manually</button>
 
+    <!-- Scrollable table listing all stops in order -->
     <div id="tableContainer">
         <table id="stopsTable">
+            <!-- # = row number/drag handle | Name = stop label + leg time | At = cumulative distance | Del = delete checkbox -->
             <thead><tr><th>#</th><th>Name</th><th>At</th><th>Del</th></tr></thead>
             <tbody id="stopsBody"></tbody>
         </table>
     </div>
+
+    <!-- Shows total route distance and estimated travel time after routing completes -->
     <div id="routeInfo" style="margin-top:10px; font-weight:bold; color:#00008B; font-size:14px;"></div>
-</aside>
 
-<div id="sidebarToggle">&#x25B6; <span id="stopCount" style="font-size:12px; background:rgba(255,255,255,0.3); border-radius:10px; padding:1px 6px; margin-left:2px;">0</span></div>
+</aside><!-- /sidebar -->
 
+<!-- Arrow tab that collapses/expands the sidebar; badge shows the stop count -->
+<div id="sidebarToggle">&#x25B6;
+    <span id="stopCount"
+          style="font-size:12px; background:rgba(255,255,255,0.3);
+                 border-radius:10px; padding:1px 6px; margin-left:2px;">0</span>
+</div>
+
+<!-- Right-click context menu that appears when a non-fixed marker is long-pressed/right-clicked -->
 <div id="markerContextMenu">
-    <div class="ctx-item" id="ctxStopName" style="font-weight:bold; border-bottom:1px solid #eee; cursor:default;"></div>
+    <div class="ctx-item" id="ctxStopName"
+         style="font-weight:bold; border-bottom:1px solid #eee; cursor:default;"></div> <!-- Stop name (read-only header) -->
     <div class="ctx-item ctx-delete" id="ctxDelete">Delete this stop</div>
 </div>
 
+<!-- Leaflet map library -->
 <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+<!-- SortableJS — adds drag-and-drop reordering to the stops table -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Sortable/1.15.0/Sortable.min.js"></script>
 
 <script>
-    // --- CONSTANTS ---
+    // ═══════════════════════════════════════════════════════════════
+    //  CONSTANTS — Fixed GPS coordinates for the two start/end sets
+    // ═══════════════════════════════════════════════════════════════
+
+    // Work depot: separate lat/lon for start and end so the two pins don't stack exactly
     const WORK_START = { name: "Start", lat: 54.971630, lon: -2.949631 };
     const WORK_END   = { name: "End",   lat: 54.971653, lon: -2.949319 };
+
+    // Home address: same idea — slight offset between start and end pins
     const HOME_START = { name: "Start", lat: 54.940460, lon: -2.735322 };
     const HOME_END   = { name: "End",   lat: 54.940529, lon: -2.735258 };
+
+    // Mapbox API token — loaded from a remote config.json at startup
     let MAPBOX_TOKEN = null;
+
+    // Single session token sent with every Mapbox Suggest request.
+    // Grouping all suggestions in one session reduces billable API calls.
     const SEARCH_SESSION_TOKEN = crypto.randomUUID();
 
-    // --- CONFIG LOADER ---
+    // ═══════════════════════════════════════════════════════════════
+    //  CONFIG LOADER — fetches the Mapbox token from a private server
+    // ═══════════════════════════════════════════════════════════════
     async function loadConfig() {
         try {
+            // Tailscale node URL — only reachable on the private network
             const resp = await fetch('https://ds923.duck-amberjack.ts.net/config.json');
             if (!resp.ok) throw new Error("HTTP " + resp.status);
             const data = await resp.json();
-            MAPBOX_TOKEN = data.mapboxToken;
+            MAPBOX_TOKEN = data.mapboxToken; // Store the token globally for all API calls
         } catch (err) {
             console.error("Failed to load config:", err);
+            // Alert the user — nothing will work without a valid token
             alert("Configuration could not be loaded. Please check your connection and refresh.");
         }
     }
 
-    // --- MAP INIT ---
+    // ═══════════════════════════════════════════════════════════════
+    //  MAP INITIALISATION
+    // ═══════════════════════════════════════════════════════════════
+
+    // Create the Leaflet map centred on northern England, zoom level 6
     const map = L.map('map').setView([54.58303, -2.56954], 6);
+
+    // Add OpenStreetMap tiles as the base layer
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19 }).addTo(map);
 
-    // --- RADIUS SLIDER ---
-    const radiusValues = [50, 100, 200, 300, 400, 600];
-    const slider = document.getElementById("radiusSlider");
-    const radiusLabel = document.getElementById("radiusLabel");
+    // ═══════════════════════════════════════════════════════════════
+    //  RADIUS SLIDER — maps 6 discrete positions to real-world values
+    // ═══════════════════════════════════════════════════════════════
 
+    // These metre values are sent as the "radiuses" parameter to the Mapbox Directions API.
+    // A larger radius lets the router snap to the road even when the waypoint is a
+    // few hundred metres off (useful for avoiding forced U-turns at close stops).
+    const radiusValues = [50, 100, 200, 300, 400, 600];
+
+    const slider       = document.getElementById("radiusSlider");
+    const radiusLabel  = document.getElementById("radiusLabel");
+
+    // Update the label text live as the slider thumb moves
     slider.addEventListener("input", () => {
         radiusLabel.textContent = `${radiusValues[slider.value]} Radius Value`;
     });
 
-    // --- STATE ---
+    // ═══════════════════════════════════════════════════════════════
+    //  APPLICATION STATE
+    // ═══════════════════════════════════════════════════════════════
+
+    // The ordered list of stops. Index 0 = start, last index = end.
+    // Middle entries are customer stops that can be reordered/deleted.
     let stops = [WORK_START, WORK_END];
+
+    // Raw lines loaded from an imported .txt / .csv customer file
     let customerData = [];
+
+    // Array of Leaflet Marker objects — rebuilt every time the stops list changes
     let markers = [];
+
+    // When true, marker drag is disabled (default: locked)
     let pointsLocked = true;
+
+    // The blue Leaflet GeoJSON polyline drawn along the road route
     let routeLine = null;
+
+    // Stores the full GeoJSON LineString after a successful routing call.
+    // Used when exporting the track as a GPX file.
     let currentRouteGeometry = null;
+
+    // Per-leg data returned by Mapbox Directions: duration (min) and distance (mi).
+    // Index i corresponds to the leg between stops[i] and stops[i+1].
     let legTimes = [];
+
+    // SortableJS instance — recreated each time the table is rebuilt
     let sortable = null;
 
-    // --- DOM REFS ---
+    // ═══════════════════════════════════════════════════════════════
+    //  DOM REFERENCES — cached once to avoid repeated getElementById
+    // ═══════════════════════════════════════════════════════════════
     const stopsBody           = document.getElementById("stopsBody");
     const routeInfoEl         = document.getElementById("routeInfo");
     const customerMatchSelect = document.getElementById("customerMatchSelect");
@@ -334,43 +542,68 @@
     const dropdownMenu        = document.getElementById("dropdownMenu");
     const menuBtn             = document.getElementById("menuBtn");
 
-    // --- TOGGLE INIT ---
-    startLabel.textContent = startToggle.checked ? "Home" : "Work";
-    autoLabel.textContent  = autoToggle.checked  ? "Auto" : "Manual";
+    // ═══════════════════════════════════════════════════════════════
+    //  TOGGLE INITIAL STATE — set label text to match default values
+    // ═══════════════════════════════════════════════════════════════
 
+    startLabel.textContent = startToggle.checked ? "Home" : "Work"; // Default = unchecked → "Work"
+    autoLabel.textContent  = autoToggle.checked  ? "Auto" : "Manual"; // Default = checked → "Auto"
+
+    // ── Start/End location set toggle ────────────────────────────
     startToggle.addEventListener("change", () => {
         const isHome = startToggle.checked;
         startLabel.textContent = isHome ? "Home" : "Work";
+
+        // Pick the correct pair of fixed pins
         const start = isHome ? HOME_START : WORK_START;
         const end   = isHome ? HOME_END   : WORK_END;
+
+        // Preserve the middle stops; swap only the first and last entries
         const middleStops = stops.slice(1, -1);
         stops = [start, ...middleStops, end];
-        updateStopsTable();
-        calculateRoute();
+
+        updateStopsTable(); // Rebuild the table UI
+        calculateRoute();   // Re-request routing with new start/end
     });
 
+    // ── Auto-enter toggle ─────────────────────────────────────────
     autoToggle.addEventListener("change", () => {
+        // Just update the visible label; the flag is read dynamically in handleSearch()
         autoLabel.textContent = autoToggle.checked ? "Auto" : "Manual";
     });
 
+    // ── Clear search button (×) ───────────────────────────────────
     clearSearchBtn.addEventListener("click", (e) => {
         e.preventDefault();
-        clearSearchUI();
+        clearSearchUI();    // Hide dropdown and clear the select list
         searchBox.value = "";
         searchBox.focus();
     });
 
-    // --- EXPORT BUTTON STATE ---
+    // ═══════════════════════════════════════════════════════════════
+    //  EXPORT BUTTON STATE
+    //  Disables the two export buttons when there is nothing to export
+    // ═══════════════════════════════════════════════════════════════
     function updateExportButtons() {
         const btnPoints = document.getElementById("btnSavePoints");
         const btnTrack  = document.getElementById("btnSaveTrack");
+
+        // "Save Points" needs at least one customer stop (i.e. more than just start + end)
         const hasStops  = stops.length > 2;
+
+        // "Save Track" requires a successful routing call (geometry exists)
         const hasRoute  = currentRouteGeometry !== null;
+
         btnPoints.disabled = !hasStops;
         btnTrack.disabled  = !hasRoute;
     }
 
-    // --- SEARCH LOGIC ---
+    // ═══════════════════════════════════════════════════════════════
+    //  SEARCH LOGIC
+    // ═══════════════════════════════════════════════════════════════
+
+    // Returns a version of func that only fires after `timeout` ms of silence.
+    // Prevents an API call on every single keystroke.
     function debounce(func, timeout = 300) {
         let timer;
         return (...args) => {
@@ -379,92 +612,126 @@
         };
     }
 
+    // Calls the Mapbox SearchBox Suggest endpoint and returns an array of suggestion objects.
+    // `country=GB` restricts results to the United Kingdom.
     async function lookupAddressMapbox(query) {
         try {
-            const url = `https://api.mapbox.com/search/searchbox/v1/suggest?q=${encodeURIComponent(query)}&country=GB&session_token=${SEARCH_SESSION_TOKEN}&access_token=${MAPBOX_TOKEN}`;
+            const url = `https://api.mapbox.com/search/searchbox/v1/suggest`
+                      + `?q=${encodeURIComponent(query)}`
+                      + `&country=GB`
+                      + `&session_token=${SEARCH_SESSION_TOKEN}`
+                      + `&access_token=${MAPBOX_TOKEN}`;
             const resp = await fetch(url);
             const data = await resp.json();
-            return data.suggestions || [];
+            return data.suggestions || []; // Return empty array on API errors / empty results
         } catch (err) { return []; }
     }
 
+    // Main search handler — runs 300 ms after the user stops typing
     const handleSearch = async () => {
         const query = searchBox.value.trim();
+
+        // Clear previous results
         customerMatchSelect.innerHTML = "";
+
+        // Show/hide the × button depending on whether there is text in the box
         clearSearchBtn.style.display = query.length > 0 ? "block" : "none";
 
+        // Don't search for very short strings
         if (query.length < 2) {
             customerMatchSelect.style.display = "none";
             document.getElementById("customerAddSelectedBtn").style.display = "none";
             return;
         }
 
+        // ── Branch A: search the loaded customer file ──────────────
         if (customerData.length > 0) {
+            // Case-insensitive substring match against every line in the file
             const matches = customerData.filter(l => l.toLowerCase().includes(query.toLowerCase()));
 
+            // Auto mode: if exactly one match, add it immediately without user interaction
             if (matches.length === 1 && autoToggle.checked) {
-                processAndAddStop(matches[0]);
+                processAndAddStop(matches[0]); // Parse the line and insert a new stop
                 clearSearchUI();
                 updateStopsTable();
                 calculateRoute();
                 return;
             }
 
+            // Multiple matches: populate the dropdown (capped at 50 to stay performant)
             matches.slice(0, 50).forEach(m => {
                 const opt = document.createElement("option");
                 opt.textContent = m; opt.value = m;
                 customerMatchSelect.appendChild(opt);
             });
+
+        // ── Branch B: online Mapbox search (no file loaded) ────────
         } else {
             const results = await lookupAddressMapbox(query);
 
+            // Auto mode: single result → retrieve coordinates and add immediately
             if (results.length === 1 && autoToggle.checked) {
                 const itemName = `${results[0].name} ${results[0].place_formatted || ''}`;
                 await retrieveAndAddMapboxPoint(results[0].mapbox_id, itemName);
-                searchBox.blur();
+                searchBox.blur();  // Dismiss keyboard on mobile
                 clearSearchUI();
                 return;
             }
 
+            // Multiple results: build the dropdown, storing the Mapbox ID as a data attribute
             results.forEach(item => {
                 const opt = document.createElement("option");
                 opt.textContent = `${item.name} ${item.place_formatted || ''}`;
-                opt.dataset.mapboxId = item.mapbox_id;
-                opt.dataset.type = "mapbox";
+                opt.dataset.mapboxId = item.mapbox_id; // Needed for the Retrieve call later
+                opt.dataset.type = "mapbox";            // Flag so the add handler knows which path to take
                 customerMatchSelect.appendChild(opt);
             });
         }
 
+        // Show the dropdown and "Add Selected" button if there are any results
         if (customerMatchSelect.options.length > 0) {
             customerMatchSelect.style.display = "block";
             document.getElementById("customerAddSelectedBtn").style.display = "block";
         }
     };
 
+    // Attach the debounced handler to the search box's input event
     searchBox.addEventListener("input", debounce(handleSearch, 300));
 
+    // Calls the Mapbox SearchBox Retrieve endpoint to get exact coordinates for a suggestion.
+    // Suggestions only contain a mapbox_id; a second API call is needed for the lat/lon.
     async function retrieveAndAddMapboxPoint(mapboxId, label) {
         try {
-            const url = `https://api.mapbox.com/search/searchbox/v1/retrieve/${mapboxId}?session_token=${SEARCH_SESSION_TOKEN}&access_token=${MAPBOX_TOKEN}`;
+            const url = `https://api.mapbox.com/search/searchbox/v1/retrieve/${mapboxId}`
+                      + `?session_token=${SEARCH_SESSION_TOKEN}`
+                      + `&access_token=${MAPBOX_TOKEN}`;
             const resp = await fetch(url);
             const data = await resp.json();
+
             if (data.features?.[0]) {
+                // GeoJSON coordinates are [longitude, latitude]
                 const [lon, lat] = data.features[0].geometry.coordinates;
+
+                // Insert the new stop before the last (end) stop
                 stops.splice(stops.length - 1, 0, { name: label, lat, lon });
-                map.flyTo([lat, lon], 16);
+
+                map.flyTo([lat, lon], 16); // Smoothly pan and zoom the map to the new stop
                 updateStopsTable();
                 calculateRoute();
             }
         } catch (err) { console.error("Retrieve error", err); }
     }
 
+    // "Add Selected to Route" button handler
     document.getElementById("customerAddSelectedBtn").addEventListener("click", async () => {
         const selected = customerMatchSelect.options[customerMatchSelect.selectedIndex];
         if (!selected) return;
 
         if (selected.dataset.type === "mapbox") {
+            // Mapbox result: need to retrieve the full coordinates
             await retrieveAndAddMapboxPoint(selected.dataset.mapboxId, selected.textContent);
         } else {
+            // File result: coordinates are embedded in the raw text line
             processAndAddStop(selected.value);
             updateStopsTable();
             calculateRoute();
@@ -472,6 +739,7 @@
         clearSearchUI();
     });
 
+    // Hides the search dropdown and resets all search UI elements
     function clearSearchUI() {
         searchBox.value = "";
         customerMatchSelect.style.display = "none";
@@ -479,23 +747,39 @@
         clearSearchBtn.style.display = "none";
     }
 
+    // Parses a raw line from the customer file and inserts a new stop.
+    // Expected format: "Name  lat  lon"  (tab, comma, or multiple spaces as delimiter)
     function processAndAddStop(rawData) {
+        // Strip quotes, then split on tab / comma / 2+ spaces
         let parts = rawData.replace(/"/g, '').split(/[\t,]+|\s{2,}/).filter(Boolean);
+
         if (parts.length >= 3) {
+            // Last two tokens are expected to be the coordinates
             let lat = parseFloat(parts[parts.length - 2]);
             let lon = parseFloat(parts[parts.length - 1]);
+            // Everything before the coordinates is treated as the stop name
             stops.splice(stops.length - 1, 0, { name: parts.slice(0, -2).join(' '), lat, lon });
             map.flyTo([lat, lon], 16);
         }
     }
 
-    // --- ROUTE & MAP CORE ---
-    async function calculateRoute() {
-        if (routeLine) map.removeLayer(routeLine);
-        const toggle = document.getElementById("routingToggle");
-        document.getElementById("routingStatusLabel").textContent = toggle.checked ? "Route" : "Points Only";
-        legTimes = [];
+    // ═══════════════════════════════════════════════════════════════
+    //  ROUTE & MAP CORE
+    // ═══════════════════════════════════════════════════════════════
 
+    // Requests a road-following route from the Mapbox Directions API,
+    // draws it on the map, and updates the stops table with leg times.
+    async function calculateRoute() {
+        // Remove any existing route polyline from the map
+        if (routeLine) map.removeLayer(routeLine);
+
+        const toggle = document.getElementById("routingToggle");
+        // Update the label next to the toggle switch
+        document.getElementById("routingStatusLabel").textContent = toggle.checked ? "Route" : "Points Only";
+
+        legTimes = []; // Clear previous leg data before each new calculation
+
+        // If routing is disabled or we only have start + end, just refresh markers
         if (!toggle.checked || stops.length < 2) {
             routeInfoEl.textContent = "";
             updateStopsTable();
@@ -505,49 +789,62 @@
         routeInfoEl.textContent = "Calculating...";
 
         try {
-            let allCoords = [];
-            let totalDistance = 0;
-            let totalDuration = 0;
+            let allCoords = [];       // Accumulates polyline coordinates across chunks
+            let totalDistance = 0;   // In metres (converted to miles for display)
+            let totalDuration = 0;   // In seconds (converted to h/m for display)
 
+            // ── Chunking ────────────────────────────────────────────
+            // Mapbox Directions allows a maximum of 25 waypoints per request.
+            // For longer routes, split stops into overlapping chunks of 25.
+            // Each chunk shares its first stop with the last stop of the previous chunk
+            // so the polyline joins seamlessly.
             for (let i = 0; i < stops.length - 1; i += 24) {
-                const chunk = stops.slice(i, i + 25);
+                const chunk = stops.slice(i, i + 25); // 25 waypoints = 24 legs
+
+                // Build the "lon,lat" coordinate string required by the API
                 const coords = chunk.map(s => `${s.lon},${s.lat}`).join(';');
 
+                // Use the same radius for every waypoint in this chunk
                 const selectedRadius = radiusValues[slider.value];
                 const radiuses = chunk.map(() => selectedRadius).join(';');
 
                 const resp = await fetch(
-                    `https://api.mapbox.com/directions/v5/mapbox/driving-traffic/${coords}` +
-                    `?geometries=geojson` +
-                    `&overview=full` +
-                    `&steps=true` +
-                    `&annotations=distance,duration` +
-                    `&continue_straight=false` +
-                    `&radiuses=${radiuses}` +
-                    `&access_token=${MAPBOX_TOKEN}`
+                    `https://api.mapbox.com/directions/v5/mapbox/driving-traffic/${coords}`
+                    + `?geometries=geojson`       // Return route as a GeoJSON LineString
+                    + `&overview=full`             // Full-resolution geometry (not simplified)
+                    + `&steps=true`                // Include turn-by-turn steps
+                    + `&annotations=distance,duration` // Per-step metrics
+                    + `&continue_straight=false`   // Allow U-turns where needed
+                    + `&radiuses=${radiuses}`
+                    + `&access_token=${MAPBOX_TOKEN}`
                 );
 
                 const data = await resp.json();
+
                 if (!data.routes || !data.routes[0]) {
+                    // Routing failed for this chunk (e.g. no road nearby) — skip and continue
                     console.error("Routing failed:", data);
                     continue;
                 }
 
                 const route = data.routes[0];
 
+                // Store per-leg travel time and distance, offset by the chunk start index
                 route.legs.forEach((leg, idx) => {
                     const globalIndex = i + idx;
                     legTimes[globalIndex] = {
-                        duration: Math.round(leg.duration / 60),
-                        distance: (leg.distance / 1609.34).toFixed(1)
+                        duration: Math.round(leg.duration / 60),        // Seconds → minutes
+                        distance: (leg.distance / 1609.34).toFixed(1)   // Metres → miles (1 dp)
                     };
                 });
 
+                // Append this chunk's polyline points to the master coordinate array
                 allCoords.push(...route.geometry.coordinates);
                 totalDistance += route.distance;
                 totalDuration += route.duration;
             }
 
+            // If all chunks failed (e.g. stops are in a lake), show a helpful message
             if (allCoords.length === 0) {
                 routeInfoEl.textContent = "Route could not be calculated — try increasing the radius value.";
                 updateStopsTable();
@@ -555,9 +852,11 @@
                 return;
             }
 
+            // Build the combined GeoJSON geometry and draw it as a dark-blue polyline
             currentRouteGeometry = { type: "LineString", coordinates: allCoords };
             routeLine = L.geoJSON(currentRouteGeometry, { color: '#00008B', weight: 4 }).addTo(map);
 
+            // Format totals for display: distance in miles, duration in hours + minutes
             const distMi = (totalDistance / 1609.34).toFixed(1);
             const hrs    = Math.floor(totalDuration / 3600);
             const mins   = Math.round((totalDuration % 3600) / 60);
@@ -566,12 +865,10 @@
             updateStopsTable();
             updateExportButtons();
 
+            // Fit the map to the route bounds after a short delay to let the DOM settle
             setTimeout(() => {
-                map.invalidateSize();
-                map.fitBounds(routeLine.getBounds(), {
-                    padding: [50, 50],
-                    maxZoom: 14
-                });
+                map.invalidateSize(); // Recalculates map size in case the sidebar changed
+                map.fitBounds(routeLine.getBounds(), { padding: [50, 50], maxZoom: 14 });
             }, 300);
 
         } catch (err) {
@@ -580,80 +877,120 @@
         }
     }
 
-    // --- UI & FILE HELPERS ---
+    // ═══════════════════════════════════════════════════════════════
+    //  UI & FILE HELPERS
+    // ═══════════════════════════════════════════════════════════════
+
+    // Returns a timestamp string "DD-MM-YY-HH-MM" for use in export filenames
     function getTimestamp() {
         const now = new Date();
-        const pad = (n) => n.toString().padStart(2, '0');
+        const pad = (n) => n.toString().padStart(2, '0'); // Zero-pad single digits
         return `${pad(now.getDate())}-${pad(now.getMonth() + 1)}-${now.getFullYear().toString().slice(-2)}-${pad(now.getHours())}-${pad(now.getMinutes())}`;
     }
 
+    // Closes the dropdown then programmatically clicks the hidden file input
     function handleImportClick() {
         dropdownMenu.style.display = "none";
         document.getElementById('universalImport').click();
     }
 
+    // Handles one or more files selected via the import button.
+    // Routes each file to the correct importer based on its extension.
     function handleUniversalImport(event) {
         const files = event.target.files;
         if (!files.length) return;
+
+        // Show comma-separated filenames below the import button
         document.getElementById("fileLabel").textContent = Array.from(files).map(f => f.name).join(', ');
+
         Array.from(files).forEach(file => {
             const reader = new FileReader();
             const ext = file.name.split('.').pop().toLowerCase();
+
             reader.onload = e => {
-                if (ext === 'gpx') importGPXLogic(e.target.result);
-                else importTextLogic(e.target.result, file.name);
+                if (ext === 'gpx') {
+                    importGPXLogic(e.target.result);   // Parse as XML waypoints
+                } else {
+                    importTextLogic(e.target.result, file.name); // Load as customer list
+                }
             };
-            reader.readAsText(file);
+            reader.readAsText(file); // Read the file as a UTF-8 string
         });
     }
 
+    // Parses a GPX file and replaces the current middle stops with <wpt> waypoints
     function importGPXLogic(content) {
-        const xml = new DOMParser().parseFromString(content, "text/xml");
+        const xml  = new DOMParser().parseFromString(content, "text/xml");
         const wpts = xml.getElementsByTagName("wpt");
         const newStops = [];
+
         for (let i = 0; i < wpts.length; i++) {
             newStops.push({
-                lat: parseFloat(wpts[i].getAttribute("lat")),
-                lon: parseFloat(wpts[i].getAttribute("lon")),
+                lat:  parseFloat(wpts[i].getAttribute("lat")),
+                lon:  parseFloat(wpts[i].getAttribute("lon")),
                 name: wpts[i].getElementsByTagName("name")[0]?.textContent || "Waypoint"
             });
         }
+
+        // Keep the fixed start and end pins; replace everything in between
         stops = [stops[0], ...newStops, stops[stops.length - 1]];
         updateStopsTable();
         calculateRoute();
     }
 
+    // Loads a .txt or .csv file as in-memory customer data for the search feature.
+    // Each line should be in the format "Name  lat  lon".
     function importTextLogic(content, fileName) {
-        customerData = content.split(/\r?\n/).filter(Boolean);
+        customerData = content.split(/\r?\n/).filter(Boolean); // Split on newlines, remove empty lines
         document.getElementById("customerFileInfo").textContent = `Loaded: ${fileName}`;
     }
 
-    map.doubleClickZoom.disable();
+    // ── Double-click to add a stop ────────────────────────────────
+    map.doubleClickZoom.disable(); // Prevent the default Leaflet zoom-on-dblclick
     map.on('dblclick', function (e) {
-        stops.splice(stops.length - 1, 0, { name: "Stop " + stops.length, lat: e.latlng.lat, lon: e.latlng.lng });
+        // Insert a new stop just before the last (end) stop
+        stops.splice(stops.length - 1, 0, {
+            name: "Stop " + stops.length,
+            lat:  e.latlng.lat,
+            lon:  e.latlng.lng
+        });
         updateStopsTable();
         calculateRoute();
     });
 
-    // --- STOPS TABLE ---
+    // ═══════════════════════════════════════════════════════════════
+    //  STOPS TABLE
+    //  Rebuilds the entire <tbody> from the current stops array,
+    //  then refreshes markers and re-initialises drag-and-drop.
+    // ═══════════════════════════════════════════════════════════════
     function updateStopsTable() {
+        // ── Build cumulative distances ─────────────────────────────
+        // Walk through legTimes to produce a running total for the "At" column.
         let cumulative = 0;
         const cumDist = stops.map((s, i) => {
-            if (i === 0) return 0;
+            if (i === 0) return 0; // Start has no cumulative distance
             const leg = legTimes[i - 1];
             if (leg) cumulative += parseFloat(leg.distance);
-            return leg ? parseFloat(cumulative.toFixed(1)) : null;
+            return leg ? parseFloat(cumulative.toFixed(1)) : null; // null = no route data yet
         });
 
+        // ── Render each row ────────────────────────────────────────
         stopsBody.innerHTML = stops.map((s, i) => {
+            // First and last stops are fixed — no delete checkbox, no editable name
             const locked = (i === 0 || i === stops.length - 1);
-            const leg = legTimes[i - 1];
+
+            const leg      = legTimes[i - 1]; // Leg arriving at this stop (from previous)
+            // Append "- X min (Y mi)" to show how long the incoming leg took
             const timeText = leg ? ` - ${leg.duration} min (${leg.distance} mi)` : "";
-            const cumText = i === 0 ? "0 mi" : (cumDist[i] !== null ? `${cumDist[i]} mi` : "-");
+            // "At" column: "0 mi" for start, cumulative distance for others, "-" if no route yet
+            const cumText  = i === 0 ? "0 mi" : (cumDist[i] !== null ? `${cumDist[i]} mi` : "-");
+
             return `<tr data-index="${i}">
                 <td class="drag-handle">${i + 1}</td>
                 <td>${locked
+                    // Fixed stop: plain text, no edit interaction
                     ? `${s.name} (fixed)${timeText}`
+                    // Customer stop: clickable <span> that becomes an <input> on click
                     : `<span class="stop-name" data-index="${i}" title="Click to edit">${s.name}</span>${timeText}`
                 }</td>
                 <td style="font-size:11px; color:#555; white-space:nowrap;">${cumText}</td>
@@ -661,97 +998,146 @@
             </tr>`;
         }).join("");
 
-        refreshMarkers();
-        initSortable();
+        refreshMarkers();    // Rebuild all map pins to reflect the new stop list
+        initSortable();      // Re-attach drag-and-drop now the tbody has been replaced
         updateExportButtons();
+
+        // Update the badge on the sidebar toggle tab (excludes fixed start/end)
         document.getElementById("stopCount").textContent = stops.length - 2;
-        saveSession();
+
+        saveSession(); // Persist the current stops list to localStorage
     }
 
-    // --- EDITABLE STOP NAMES ---
+    // ═══════════════════════════════════════════════════════════════
+    //  EDITABLE STOP NAMES
+    //  Clicking a .stop-name span replaces it with a text <input>.
+    //  Uses event delegation on the <tbody> so it works after table rebuilds.
+    // ═══════════════════════════════════════════════════════════════
     document.getElementById("stopsBody").addEventListener("click", (e) => {
         const span = e.target.closest(".stop-name");
-        if (!span) return;
+        if (!span) return; // Click was not on a stop name — ignore
 
-        const idx = parseInt(span.dataset.index);
+        const idx         = parseInt(span.dataset.index);
         const currentName = stops[idx].name;
 
-        const input = document.createElement("input");
-        input.type = "text";
-        input.className = "stop-name-input";
-        input.value = currentName;
+        // Create an <input> pre-filled with the current name
+        const input       = document.createElement("input");
+        input.type        = "text";
+        input.className   = "stop-name-input";
+        input.value       = currentName;
 
+        // Swap the <span> for the <input> in-place
         span.replaceWith(input);
         input.focus();
-        input.select();
+        input.select(); // Select all text so the user can overwrite immediately
 
+        // Commits the new name and rebuilds the table
         function commitEdit() {
+            // Fall back to original name if the input is blank
             const newName = input.value.trim() || currentName;
             stops[idx].name = newName;
             updateStopsTable();
         }
 
-        input.addEventListener("blur", commitEdit);
+        input.addEventListener("blur",    commitEdit);  // Save when focus leaves the input
         input.addEventListener("keydown", (e) => {
-            if (e.key === "Enter")  { input.blur(); }
-            if (e.key === "Escape") { stops[idx].name = currentName; updateStopsTable(); }
+            if (e.key === "Enter")  { input.blur(); }  // Enter key commits
+            if (e.key === "Escape") {
+                // Escape cancels — restore the original name without saving
+                stops[idx].name = currentName;
+                updateStopsTable();
+            }
         });
     });
 
+    // ═══════════════════════════════════════════════════════════════
+    //  MARKERS
+    //  Removes all existing markers and recreates one per stop.
+    //  Colour convention: green = start, red = end, blue = customer stop.
+    // ═══════════════════════════════════════════════════════════════
     function refreshMarkers() {
+        // Remove every existing marker from the map
         markers.forEach(m => map.removeLayer(m));
         markers = [];
+
         stops.forEach((s, i) => {
-            let color = (i === 0) ? "green" : (i === stops.length - 1) ? "red" : "rgba(0,123,255,0.7)";
+            // Choose pin colour by position in the array
+            let color = (i === 0) ? "green"
+                      : (i === stops.length - 1) ? "red"
+                      : "rgba(0,123,255,0.7)";
+
+            // DivIcon renders the marker as a numbered HTML circle instead of the default pin image
             const icon = L.divIcon({
                 className: '',
                 html: `<div class="marker-label" style="background:${color}">${i + 1}</div>`,
-                iconSize: [30, 30], iconAnchor: [15, 15]
+                iconSize:   [30, 30],
+                iconAnchor: [15, 15]  // Centre the icon on the coordinate point
             });
-            const marker = L.marker([s.lat, s.lon], { icon, draggable: !pointsLocked }).addTo(map);
 
-            const leg = legTimes[i - 1];
-            const nextLeg = legTimes[i];
+            const marker = L.marker([s.lat, s.lon], {
+                icon,
+                draggable: !pointsLocked // Drag only works when points are unlocked
+            }).addTo(map);
+
+            // ── Popup content ──────────────────────────────────────
+            const leg     = legTimes[i - 1]; // Leg arriving at this stop
+            const nextLeg = legTimes[i];     // Leg departing from this stop
             let popupHtml = `<div class="stop-popup">`;
             popupHtml += `<div class="popup-name">${s.name}</div>`;
+
             if (i === 0) {
+                // Start stop: show departure leg only
                 popupHtml += `<div class="popup-row"><span>Start point</span></div>`;
                 if (nextLeg) popupHtml += `<div class="popup-row"><span>To next stop</span><span>${nextLeg.distance} mi / ${nextLeg.duration} min</span></div>`;
             } else if (i === stops.length - 1) {
+                // End stop: show arrival leg only
                 popupHtml += `<div class="popup-row"><span>End point</span></div>`;
                 if (leg) popupHtml += `<div class="popup-row"><span>From previous</span><span>${leg.distance} mi / ${leg.duration} min</span></div>`;
             } else {
-                if (leg) popupHtml += `<div class="popup-row"><span>From previous</span><span>${leg.distance} mi / ${leg.duration} min</span></div>`;
+                // Customer stop: show both arrival and departure legs
+                if (leg)     popupHtml += `<div class="popup-row"><span>From previous</span><span>${leg.distance} mi / ${leg.duration} min</span></div>`;
                 if (nextLeg) popupHtml += `<div class="popup-row"><span>To next stop</span><span>${nextLeg.distance} mi / ${nextLeg.duration} min</span></div>`;
                 if (!leg && !nextLeg) popupHtml += `<div class="popup-row"><span>No route data yet</span></div>`;
             }
             popupHtml += `</div>`;
+
             marker.bindPopup(popupHtml, { offset: [0, -12], maxWidth: 220 });
 
+            // Right-click (or long-press on mobile) shows the context menu for non-fixed stops
             marker.on('contextmenu', (e) => {
-                if (i === 0 || i === stops.length - 1) return;
+                if (i === 0 || i === stops.length - 1) return; // Fixed stops cannot be deleted
                 showMarkerContextMenu(e.originalEvent, i, s.name);
             });
+
+            // When a marker is dragged to a new position, update its coordinates and recalculate
             marker.on('dragend', (event) => {
                 const pos = event.target.getLatLng();
                 stops[i].lat = pos.lat;
                 stops[i].lon = pos.lng;
                 calculateRoute();
             });
-            markers.push(marker);
+
+            markers.push(marker); // Keep a reference so we can remove it later
         });
     }
 
-    // --- MARKER CONTEXT MENU ---
-    let ctxTargetIndex = null;
+    // ═══════════════════════════════════════════════════════════════
+    //  MARKER CONTEXT MENU — right-click menu for customer stops
+    // ═══════════════════════════════════════════════════════════════
+    let ctxTargetIndex = null; // Tracks which stop the menu was opened for
     const markerContextMenu = document.getElementById("markerContextMenu");
 
+    // Positions and displays the context menu near the right-click location
     function showMarkerContextMenu(e, stopIndex, stopName) {
-        e.preventDefault();
-        e.stopPropagation();
-        ctxTargetIndex = stopIndex;
-        document.getElementById("ctxStopName").textContent = stopName;
+        e.preventDefault();  // Suppress the browser's native context menu
+        e.stopPropagation(); // Don't let the click bubble up and close the menu again
+
+        ctxTargetIndex = stopIndex; // Remember which stop this menu belongs to
+        document.getElementById("ctxStopName").textContent = stopName; // Display stop name as header
+
         markerContextMenu.style.display = "block";
+
+        // Calculate safe position — keep the menu within the viewport
         const menuW = markerContextMenu.offsetWidth;
         const menuH = markerContextMenu.offsetHeight;
         const x = Math.min(e.clientX, window.innerWidth  - menuW - 8);
@@ -760,14 +1146,18 @@
         markerContextMenu.style.top  = y + "px";
     }
 
+    // Hides the context menu and clears the tracked stop index
     function hideMarkerContextMenu() {
         markerContextMenu.style.display = "none";
         ctxTargetIndex = null;
     }
 
+    // "Delete this stop" option in the context menu
     document.getElementById("ctxDelete").addEventListener("click", () => {
         if (ctxTargetIndex === null) return;
-        stops.splice(ctxTargetIndex, 1);
+        stops.splice(ctxTargetIndex, 1); // Remove the stop from the array
+
+        // If we're left with only start + end, turn off routing to avoid an API error
         if (stops.length <= 2) {
             const toggle = document.getElementById("routingToggle");
             toggle.checked = false;
@@ -775,58 +1165,85 @@
             currentRouteGeometry = null;
             if (routeLine) { map.removeLayer(routeLine); routeLine = null; }
         }
+
         hideMarkerContextMenu();
         updateStopsTable();
         calculateRoute();
     });
 
+    // Close the context menu on any click outside it, or when the map moves
     document.addEventListener("click",       hideMarkerContextMenu);
-    document.addEventListener("contextmenu", (e) => { if (!markerContextMenu.contains(e.target)) hideMarkerContextMenu(); });
+    document.addEventListener("contextmenu", (e) => {
+        if (!markerContextMenu.contains(e.target)) hideMarkerContextMenu();
+    });
     map.on("click",     hideMarkerContextMenu);
-    map.on("movestart", hideMarkerContextMenu);
+    map.on("movestart", hideMarkerContextMenu); // Hide when panning starts
 
+    // ═══════════════════════════════════════════════════════════════
+    //  SORTABLE — drag-and-drop reordering for the stops table
+    // ═══════════════════════════════════════════════════════════════
     function initSortable() {
-        if (sortable) sortable.destroy();
+        if (sortable) sortable.destroy(); // Destroy the previous instance before creating a new one
+
         sortable = Sortable.create(stopsBody, {
-            handle: '.drag-handle',
-            animation: 150,
+            handle: '.drag-handle',  // Only the # cell can initiate a drag
+            animation: 150,          // Smooth 150 ms slide animation when rows reorder
+
+            // Prevent the first and last rows from being dragged over (they are fixed)
             filter: 'tr:first-child, tr:last-child',
             preventOnFilter: true,
+
             onMove: function(evt) {
-                const items = stopsBody.querySelectorAll('tr');
+                // Block a drag from landing on the first or last row
+                const items     = stopsBody.querySelectorAll('tr');
                 const lastIndex = items.length - 1;
                 if (evt.related === items[0] || evt.related === items[lastIndex]) {
-                    return false;
+                    return false; // Returning false cancels the move
                 }
             },
+
             onEnd: () => {
+                // After a drop, read the new DOM order and rebuild the stops array accordingly
                 const newStops = [];
-                stopsBody.querySelectorAll('tr[data-index]').forEach(row => newStops.push(stops[parseInt(row.dataset.index)]));
+                stopsBody.querySelectorAll('tr[data-index]').forEach(row => {
+                    newStops.push(stops[parseInt(row.dataset.index)]);
+                });
+                // Preserve the fixed start (index 0) and end (last index)
                 stops = [newStops[0], ...newStops.slice(1, -1), newStops[newStops.length - 1]];
                 updateStopsTable();
-                calculateRoute();
+                calculateRoute(); // Recalculate with the new stop order
             }
         });
     }
 
-    // --- BASE64 (chunked to avoid call stack limit on large tracks) ---
+    // ═══════════════════════════════════════════════════════════════
+    //  BASE64 ENCODER — chunked to avoid call stack overflow on
+    //  large GPX track files (thousands of coordinates)
+    // ═══════════════════════════════════════════════════════════════
     function toBase64(str) {
-        const bytes = new TextEncoder().encode(str);
-        let binary = '';
-        const chunkSize = 8192;
+        const bytes = new TextEncoder().encode(str); // Convert string to UTF-8 byte array
+        let binary  = '';
+        const chunkSize = 8192; // Process 8 KB at a time to stay within the JS stack limit
+
         for (let i = 0; i < bytes.length; i += chunkSize) {
             binary += String.fromCharCode(...bytes.subarray(i, i + chunkSize));
         }
-        return btoa(binary);
+        return btoa(binary); // Standard base64 encoding of the binary string
     }
 
-    // --- EXPORT ---
+    // ═══════════════════════════════════════════════════════════════
+    //  EXPORT — writes a GPX file using the best available method
+    // ═══════════════════════════════════════════════════════════════
     async function exportFile(content, filename) {
+        // ── Android: use a data URI with a custom name attribute ──
+        // The Android WebView intercepts this URL and saves the file
         if (/Android/i.test(navigator.userAgent)) {
             const androidName = filename.replace(/\.gpx$/i, '');
             window.location.href = `data:application/gpx+xml;name=${androidName};base64,${toBase64(content)}`;
             return;
         }
+
+        // ── Modern browsers: File System Access API (shows a native save dialog) ──
         if (window.showSaveFilePicker) {
             try {
                 const fileHandle = await window.showSaveFilePicker({
@@ -837,94 +1254,133 @@
                 await writable.write(content);
                 await writable.close();
             } catch (err) {
+                // AbortError means the user cancelled the dialog — not an actual error
                 if (err.name !== 'AbortError') {
                     console.error("Save failed:", err);
                     alert("Save failed: " + err.message);
                 }
             }
+
+        // ── Fallback: create a temporary <a> and click it programmatically ──
         } else {
             const blob = new Blob([content], { type: 'application/gpx+xml' });
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
+            const url  = URL.createObjectURL(blob);    // Temporary in-memory URL
+            const a    = document.createElement('a');
+            a.href     = url;
             a.download = filename;
             document.body.appendChild(a);
-            a.click();
+            a.click();                                  // Trigger the download
             document.body.removeChild(a);
-            URL.revokeObjectURL(url);
+            URL.revokeObjectURL(url);                   // Release the blob URL from memory
         }
     }
 
+    // Exports the middle stops (excluding start/end) as GPX <wpt> elements
     async function exportWaypoints() {
         if (stops.length <= 2) return alert("No custom stops to export.");
-        const ts = getTimestamp();
+
+        const ts       = getTimestamp();
         const baseName = document.getElementById("exportFileName").value.trim() || "Points";
-        let gpx = '<?xml version="1.0" encoding="UTF-8"?>\n<gpx version="1.1" creator="RoutePlannerPro" xmlns="http://www.topografix.com/GPX/1/1">\n';
-        gpx += '  <metadata>\n    <name>Points ' + ts + '</name>\n  </metadata>\n';
+
+        // Build a minimal GPX file string
+        let gpx = '<?xml version="1.0" encoding="UTF-8"?>\n'
+                + '<gpx version="1.1" creator="RoutePlannerPro" xmlns="http://www.topografix.com/GPX/1/1">\n'
+                + `  <metadata>\n    <name>Points ${ts}</name>\n  </metadata>\n`;
+
+        // Add one <wpt> element per customer stop
         stops.slice(1, -1).forEach(s => {
             gpx += `  <wpt lat="${s.lat}" lon="${s.lon}"><name>${s.name}</name></wpt>\n`;
         });
+
         gpx += '</gpx>';
         await exportFile(gpx, `${baseName}_${ts}.gpx`);
     }
 
+    // Exports the road-following polyline as a GPX <trk> track
     async function exportRoadTrack() {
         if (!currentRouteGeometry) return alert("Turn Routing ON first to generate a track.");
-        const ts = getTimestamp();
+
+        const ts       = getTimestamp();
         const baseName = document.getElementById("exportFileName").value.trim() || "Track";
-        let gpx = '<?xml version="1.0" encoding="UTF-8"?>\n<gpx version="1.1" creator="RoutePlannerPro" xmlns="http://www.topografix.com/GPX/1/1">\n';
-        gpx += '  <metadata>\n    <name>Track ' + ts + '</name>\n  </metadata>\n';
-        gpx += '  <trk><name>Route</name><trkseg>\n';
+
+        let gpx = '<?xml version="1.0" encoding="UTF-8"?>\n'
+                + '<gpx version="1.1" creator="RoutePlannerPro" xmlns="http://www.topografix.com/GPX/1/1">\n'
+                + `  <metadata>\n    <name>Track ${ts}</name>\n  </metadata>\n`
+                + '  <trk><name>Route</name><trkseg>\n';
+
+        // Each coordinate in the GeoJSON geometry becomes a <trkpt>
+        // Note: GeoJSON is [lon, lat], GPX is lat="..." lon="..."
         currentRouteGeometry.coordinates.forEach(c => {
             gpx += `    <trkpt lat="${c[1]}" lon="${c[0]}"></trkpt>\n`;
         });
+
         gpx += '  </trkseg></trk>\n</gpx>';
         await exportFile(gpx, `${baseName}_${ts}.gpx`);
     }
 
+    // Reads the manual entry fields and inserts a new stop with the given coordinates
     function addManualStop() {
         const name = document.getElementById("manualName").value.trim() || "Manual Stop";
         const lat  = parseFloat(document.getElementById("manualLat").value);
         const lon  = parseFloat(document.getElementById("manualLon").value);
+
         if (!isNaN(lat) && !isNaN(lon)) {
-            stops.splice(stops.length - 1, 0, { name, lat, lon });
+            stops.splice(stops.length - 1, 0, { name, lat, lon }); // Insert before the end stop
             updateStopsTable();
             calculateRoute();
             map.flyTo([lat, lon], 16);
         } else {
             alert("Invalid coordinates. Please enter valid Latitude and Longitude values.");
         }
+
+        // Clear the input fields ready for the next entry
         document.getElementById('manualName').value = '';
-        document.getElementById("manualLat").value = '';
-        document.getElementById("manualLon").value = '';
+        document.getElementById("manualLat").value  = '';
+        document.getElementById("manualLon").value  = '';
     }
 
+    // Prompts for confirmation then resets the route back to just start + end
     function clearStops() {
         if (!confirm("Clear all stops and reset the route?")) return;
-        dropdownMenu.style.display = "none";
+
+        dropdownMenu.style.display = "none"; // Close the options menu
+
         const isHome = startToggle.checked;
-        const start = isHome ? HOME_START : WORK_START;
-        const end   = isHome ? HOME_END   : WORK_END;
-        stops = [start, end];
-        customerData = [];
+        const start  = isHome ? HOME_START : WORK_START;
+        const end    = isHome ? HOME_END   : WORK_END;
+
+        stops               = [start, end];
+        customerData        = [];
         currentRouteGeometry = null;
-        clearSession();
-        document.getElementById('universalImport').value = '';
-        document.getElementById("fileLabel").textContent = "";
+
+        clearSession(); // Remove saved stops from localStorage
+
+        // Reset the file input so the same file can be re-imported if needed
+        document.getElementById('universalImport').value     = '';
+        document.getElementById("fileLabel").textContent     = "";
         document.getElementById("customerFileInfo").textContent = "Search (File or Online UK):";
+
+        // Switch back to Points Only mode
         const toggle = document.getElementById("routingToggle");
         toggle.checked = false;
         document.getElementById("routingStatusLabel").textContent = "Points Only";
+
         updateStopsTable();
         calculateRoute();
     }
 
+    // Removes all stops whose delete checkbox is checked
     function deleteSelectedStops() {
         dropdownMenu.style.display = "none";
+
         const checkboxes = stopsBody.querySelectorAll(".deleteChk:checked");
+        // Collect the data-index values of checked rows
         const indices = Array.from(checkboxes).map(cb => parseInt(cb.closest("tr").dataset.index));
+
+        // Keep only stops whose index is not in the deletion list
         stops = stops.filter((_, i) => !indices.includes(i));
 
+        // If no customer stops remain, disable routing to avoid an empty-route API call
         if (stops.length <= 2) {
             const toggle = document.getElementById("routingToggle");
             toggle.checked = false;
@@ -937,97 +1393,142 @@
         calculateRoute();
     }
 
+    // Reverses the order of all customer stops (start and end remain fixed)
     function reverseRoute() {
-        if (stops.length <= 2) return;
+        if (stops.length <= 2) return; // Nothing to reverse
         dropdownMenu.style.display = "none";
+
+        // Keep index 0 and the last index; reverse only the slice in between
         stops = [stops[0], ...stops.slice(1, -1).reverse(), stops[stops.length - 1]];
         updateStopsTable();
         calculateRoute();
     }
 
-    // --- SIDEBAR TOGGLE ---
+    // ═══════════════════════════════════════════════════════════════
+    //  SIDEBAR TOGGLE — collapses/expands the sidebar panel
+    // ═══════════════════════════════════════════════════════════════
     document.getElementById("sidebarToggle").addEventListener("click", () => {
-        const sb = document.getElementById("sidebar");
-        sb.classList.toggle("collapsed");
+        const sb        = document.getElementById("sidebar");
+        sb.classList.toggle("collapsed"); // CSS transition slides the panel in or out
         const isCollapsed = sb.classList.contains("collapsed");
-        const count = document.getElementById("stopCount").textContent;
+        const count       = document.getElementById("stopCount").textContent;
+
+        // Swap the arrow direction to indicate open vs closed state
         document.getElementById("sidebarToggle").innerHTML = isCollapsed
             ? `&#x25C0; <span id="stopCount" style="font-size:12px; background:rgba(255,255,255,0.3); border-radius:10px; padding:1px 6px; margin-left:2px;">${count}</span>`
             : `&#x25B6; <span id="stopCount" style="font-size:12px; background:rgba(255,255,255,0.3); border-radius:10px; padding:1px 6px; margin-left:2px;">${count}</span>`;
+
+        // Leaflet needs to be told the map size changed so it can redraw tiles correctly
         setTimeout(() => map.invalidateSize(), 300);
     });
 
-    // --- LOCATION TRACKING ---
-    // The blue dot is a fixed CSS element centred on screen.
-    // The map pans underneath it on every GPS update.
-    let watchId = null;
+    // ═══════════════════════════════════════════════════════════════
+    //  LIVE LOCATION TRACKING
+    //  The crosshair pin stays fixed at the screen centre.
+    //  The map pans to follow the GPS position, so the user is
+    //  always at the centre of the view while driving.
+    // ═══════════════════════════════════════════════════════════════
+    let watchId      = null; // Stores the ID returned by watchPosition (needed to stop it)
     const locationPin = document.getElementById("locationPin");
 
     document.getElementById("toggleLocation").addEventListener("click", () => {
         const btn = document.getElementById("toggleLocation");
 
         if (watchId) {
-            // Turn off
-            navigator.geolocation.clearWatch(watchId);
+            // ── Disable tracking ──────────────────────────────────
+            navigator.geolocation.clearWatch(watchId); // Stop GPS callbacks
             watchId = null;
-            locationPin.style.display = "none";
+            locationPin.style.display = "none";         // Hide the crosshair
             btn.textContent = "Enable Current Location";
         } else {
-            // Turn on — show pin and start panning map on every update
-            locationPin.style.display = "block";
-            watchId = navigator.geolocation.watchPosition(p => {
-                const lat = p.coords.latitude, lon = p.coords.longitude;
-                map.setView([lat, lon], map.getZoom() < 14 ? 14 : map.getZoom(), { animate: true });
-            }, (err) => {
-                console.error("Location error:", err);
-                alert("Unable to get location: " + err.message);
-            }, { enableHighAccuracy: true, maximumAge: 0, timeout: 10000 });
+            // ── Enable tracking ───────────────────────────────────
+            locationPin.style.display = "block"; // Show the crosshair immediately
+
+            watchId = navigator.geolocation.watchPosition(
+                p => {
+                    const lat = p.coords.latitude;
+                    const lon = p.coords.longitude;
+
+                    // Pan the map to keep the GPS position under the crosshair.
+                    // If we're zoomed out past level 14, zoom in to a useful driving level.
+                    map.setView([lat, lon],
+                        map.getZoom() < 14 ? 14 : map.getZoom(),
+                        { animate: true }
+                    );
+                },
+                (err) => {
+                    console.error("Location error:", err);
+                    alert("Unable to get location: " + err.message);
+                },
+                {
+                    enableHighAccuracy: true, // Use GPS chip (not cell/WiFi triangulation)
+                    maximumAge: 0,            // Always use a fresh position
+                    timeout: 10000            // Fail if no fix within 10 seconds
+                }
+            );
+
             btn.textContent = "Disable Current Location";
         }
     });
 
-    // --- LOCK POINTS TOGGLE ---
+    // ═══════════════════════════════════════════════════════════════
+    //  LOCK POINTS TOGGLE — enables/disables marker drag
+    // ═══════════════════════════════════════════════════════════════
     document.getElementById("lockPointsToggle").addEventListener("change", function () {
+        // The toggle is "on" when checked, so locked = NOT checked
         pointsLocked = !this.checked;
         document.getElementById("lockPointsLabel").textContent = pointsLocked ? "Locked" : "Unlocked";
-        refreshMarkers();
+        refreshMarkers(); // Recreate markers with the updated draggable setting
     });
 
-    // --- HAMBURGER MENU ---
+    // ═══════════════════════════════════════════════════════════════
+    //  HAMBURGER MENU — open/close the dropdown options panel
+    // ═══════════════════════════════════════════════════════════════
     menuBtn.addEventListener("click", (e) => {
-        e.stopPropagation();
+        e.stopPropagation(); // Prevent the document click handler from closing it immediately
         dropdownMenu.style.display = dropdownMenu.style.display === "block" ? "none" : "block";
     });
 
+    // Close the dropdown when clicking anywhere outside the menu button or panel
     document.addEventListener("click", (e) => {
         if (!menuBtn.contains(e.target) && !dropdownMenu.contains(e.target)) {
             dropdownMenu.style.display = "none";
         }
     });
 
-    // --- SESSION STORAGE ---
+    // ═══════════════════════════════════════════════════════════════
+    //  SESSION STORAGE — persists stops between page reloads
+    //  Uses localStorage so the route survives a browser refresh.
+    // ═══════════════════════════════════════════════════════════════
+
+    // Serialises the stops array and start toggle state to localStorage
     function saveSession() {
         try {
-            localStorage.setItem('routePlanner_stops', JSON.stringify(stops));
+            localStorage.setItem('routePlanner_stops',       JSON.stringify(stops));
             localStorage.setItem('routePlanner_startToggle', startToggle.checked);
         } catch (err) {
-            console.warn("Could not save session:", err);
+            console.warn("Could not save session:", err); // e.g. private browsing with storage disabled
         }
     }
 
+    // Reads stops and start toggle state back from localStorage on page load
+    // Returns true if a valid session was found and restored, false otherwise
     function restoreSession() {
         try {
-            const saved = localStorage.getItem('routePlanner_stops');
+            const saved      = localStorage.getItem('routePlanner_stops');
             const savedStart = localStorage.getItem('routePlanner_startToggle');
             if (!saved) return false;
+
             const parsed = JSON.parse(saved);
-            if (!Array.isArray(parsed) || parsed.length < 2) return false;
+            if (!Array.isArray(parsed) || parsed.length < 2) return false; // Sanity check
+
             if (savedStart !== null) {
-                const isHome = savedStart === 'true';
-                startToggle.checked = isHome;
+                const isHome = savedStart === 'true'; // localStorage stores booleans as strings
+                startToggle.checked    = isHome;
                 startLabel.textContent = isHome ? "Home" : "Work";
             }
-            stops = parsed;
+
+            stops = parsed; // Replace default stops with the saved ones
             return true;
         } catch (err) {
             console.warn("Could not restore session:", err);
@@ -1035,6 +1536,7 @@
         }
     }
 
+    // Removes the saved session from localStorage (called when "Clear All" is used)
     function clearSession() {
         try {
             localStorage.removeItem('routePlanner_stops');
@@ -1044,59 +1546,79 @@
         }
     }
 
-    // --- MANUAL TOKEN ENTRY ---
+    // ═══════════════════════════════════════════════════════════════
+    //  MANUAL TOKEN ENTRY — fallback if config.json is unreachable
+    // ═══════════════════════════════════════════════════════════════
+
+    // Toggles the visibility of the token paste area
     function toggleTokenInput() {
         const area = document.getElementById("tokenInputArea");
         area.style.display = area.style.display === "none" ? "block" : "none";
         if (area.style.display === "block") {
-            document.getElementById("tokenPasteBox").focus();
+            document.getElementById("tokenPasteBox").focus(); // Auto-focus ready for pasting
         }
     }
 
+    // Reads the pasted value, validates it, and sets MAPBOX_TOKEN
     function applyPastedToken() {
         const raw = document.getElementById("tokenPasteBox").value.trim();
         let token = null;
+
         try {
+            // Support pasting the entire config.json object or just the raw token string
             const parsed = JSON.parse(raw);
             token = parsed.mapboxToken || parsed.token || null;
         } catch (e) {
+            // Not JSON — treat it as a raw token if it looks like one
             if (raw.startsWith("pk.")) token = raw;
         }
+
         if (token) {
             MAPBOX_TOKEN = token;
-            document.getElementById("tokenPasteBox").value = "";
+            document.getElementById("tokenPasteBox").value = ""; // Clear after applying
             document.getElementById("tokenInputArea").style.display = "none";
             dropdownMenu.style.display = "none";
-            updateStopsTable();
+            updateStopsTable(); // Refresh so the Mapbox-dependent features can be used
             alert("Token applied successfully.");
         } else {
             alert("Invalid token. It should start with pk.ey...");
         }
     }
 
-    // --- NFC DATA HANDLER ---
+    // ═══════════════════════════════════════════════════════════════
+    //  NFC DATA HANDLER
+    //  If an NFC tag wrote a Mapbox token into sessionStorage
+    //  (handled by a separate NFC reader page), apply it automatically.
+    // ═══════════════════════════════════════════════════════════════
     function handleNfcData() {
         const data = sessionStorage.getItem("nfcData");
-        if (!data) return;
+        if (!data) return; // Nothing to process
+
         console.log("NFC Data received:", data);
+
         const tokenBox = document.getElementById("tokenPasteBox");
         if (tokenBox) {
-            tokenBox.value = data;
+            tokenBox.value = data;                                    // Pre-fill the paste box
             document.getElementById("tokenInputArea").style.display = "block";
-            applyPastedToken();
-            if (navigator.vibrate) navigator.vibrate(100);
+            applyPastedToken();                                       // Apply the token immediately
+            if (navigator.vibrate) navigator.vibrate(100);            // Haptic feedback on Android
         }
-        sessionStorage.removeItem("nfcData");
+
+        sessionStorage.removeItem("nfcData"); // Consume the value so it isn't reused on reload
     }
 
-    // --- INIT ---
+    // ═══════════════════════════════════════════════════════════════
+    //  BOOTSTRAP — entry point executed after the page loads
+    // ═══════════════════════════════════════════════════════════════
     loadConfig().then(() => {
+        // Try to restore the previous session from localStorage
         const restored = restoreSession();
         if (restored) {
             console.log("Session restored:", stops.length, "stops");
         }
-        updateStopsTable();
-        handleNfcData();
+
+        updateStopsTable(); // Render the initial stops list and map markers
+        handleNfcData();    // Check if an NFC token was passed via sessionStorage
     });
 </script>
 </body>
